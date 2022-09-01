@@ -21,20 +21,38 @@ pub enum Token {
     Comma,
     Comment,
     Def,
-    Else,
     EOF,
-    Extern,
-    For,
     Ident(String),
-    If,
-    In,
-    LParen,
+    ParenLeft,
+    ParenRight,
     Number(f64),
     Op(char),
-    RParen,
-    Then,
     Unary,
     Var,
+    TensorBegin,
+    TensorEnd,
+    Semicolon,
+    BlockLeft,
+    BlockRight,
+    AngleLeft,
+    AngleRight,
+    Return,
+}
+
+pub struct VarType {
+    shape: Vec<usize>,
+}
+
+impl VarType {
+    pub fn new() -> Self {
+        Self { shape: Vec::new() }
+    }
+}
+
+impl Default for VarType {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Defines an error encountered by the `Lexer`.
@@ -56,6 +74,23 @@ impl LexError {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Location {
+    filename: String,
+    row: usize,
+    col: usize,
+}
+
+impl Location {
+    pub fn new(filename: &str, row: usize, col: usize) -> Location {
+        Location {
+            filename: filename.to_string(),
+            row,
+            col,
+        }
+    }
+}
+
 /// Defines the result of a lexing operation; namely a
 /// `Token` on success, or a `LexError` on failure.
 pub type LexResult = Result<Token, LexError>;
@@ -66,6 +101,7 @@ pub struct Lexer<'a> {
     input: &'a str,
     chars: Box<Peekable<Chars<'a>>>,
     pos: usize,
+    last_location: Location,
 }
 
 impl<'a> Lexer<'a> {
@@ -75,6 +111,11 @@ impl<'a> Lexer<'a> {
             input,
             chars: Box::new(input.chars().peekable()),
             pos: 0,
+            last_location: Location {
+                filename: "filename.toy".to_string(),
+                row: 0,
+                col: 0,
+            },
         }
     }
 
@@ -119,8 +160,8 @@ impl<'a> Lexer<'a> {
 
         // Actually get the next token.
         let result = match next.unwrap() {
-            '(' => Ok(Token::LParen),
-            ')' => Ok(Token::RParen),
+            '(' => Ok(Token::ParenLeft),
+            ')' => Ok(Token::ParenRight),
             ',' => Ok(Token::Comma),
 
             '#' => {
@@ -176,19 +217,22 @@ impl<'a> Lexer<'a> {
 
                 match &src[start..pos] {
                     "def" => Ok(Token::Def),
-                    "extern" => Ok(Token::Extern),
-                    "if" => Ok(Token::If),
-                    "then" => Ok(Token::Then),
-                    "else" => Ok(Token::Else),
-                    "for" => Ok(Token::For),
-                    "in" => Ok(Token::In),
                     "unary" => Ok(Token::Unary),
                     "binary" => Ok(Token::Binary),
                     "var" => Ok(Token::Var),
+                    "return" => Ok(Token::Return),
 
                     ident => Ok(Token::Ident(ident.to_string())),
                 }
             }
+
+            '[' => Ok(Token::TensorBegin),
+            ']' => Ok(Token::TensorEnd),
+            ';' => Ok(Token::Semicolon),
+            '{' => Ok(Token::BlockLeft),
+            '}' => Ok(Token::BlockRight),
+            '<' => Ok(Token::AngleLeft),
+            '>' => Ok(Token::AngleRight),
 
             op => {
                 // Parse operator
@@ -200,6 +244,10 @@ impl<'a> Lexer<'a> {
         self.pos = pos;
 
         result
+    }
+
+    pub fn last_location(&self) -> Location {
+        self.last_location.clone()
     }
 }
 
@@ -234,27 +282,25 @@ pub enum Expr {
         args: Vec<Expr>,
     },
 
-    Conditional {
-        cond: Box<Expr>,
-        consequence: Box<Expr>,
-        alternative: Box<Expr>,
-    },
-
-    For {
-        var_name: String,
-        start: Box<Expr>,
-        end: Box<Expr>,
-        step: Option<Box<Expr>>,
-        body: Box<Expr>,
-    },
-
     Number(f64),
 
     Variable(String),
 
     VarIn {
         variables: Vec<(String, Option<Expr>)>,
-        body: Box<Expr>,
+    },
+
+    Tensor {
+        location: Location,
+        values: Vec<Expr>,
+        dims: Vec<usize>,
+    },
+    ExprList {
+        expressions: Vec<Box<Expr>>,
+    },
+    Return {
+        location: Location,
+        expression: Box<Expr>,
     },
 }
 
@@ -265,6 +311,7 @@ pub struct Prototype {
     pub args: Vec<String>,
     pub is_op: bool,
     pub prec: usize,
+    pub location: Location,
 }
 
 /// Defines a user-defined or external function.
@@ -272,7 +319,11 @@ pub struct Prototype {
 pub struct Function {
     pub prototype: Prototype,
     pub body: Option<Expr>,
-    pub is_anon: bool,
+}
+
+#[derive(Debug)]
+pub struct Module {
+    pub functions: Vec<Function>,
 }
 
 /// Represents the `Expr` parser.
@@ -299,25 +350,32 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parses the content of the parser.
-    pub fn parse(&mut self) -> Result<Function, &'static str> {
-        let result = match self.current()? {
-            Def => self.parse_def(),
-            Extern => self.parse_extern(),
-            _ => self.parse_toplevel_expr(),
-        };
-
-        match result {
-            Ok(result) => {
-                if !self.at_end() {
-                    Err("Unexpected token after parsed expression.")
-                } else {
-                    Ok(result)
+    pub fn parse_module(&mut self) -> Result<Module, &'static str> {
+        let mut functions = Vec::new();
+        loop {
+            match self.current()? {
+                Def => {
+                    functions.push(self.parse_def()?);
+                }
+                Comment => {
+                    self.advance();
+                    continue;
+                }
+                EOF => {
+                    println!("end of file reached!");
+                    break;
+                }
+                _ => {
+                    // TODO: error situation
+                    break;
                 }
             }
-
-            err => err,
+            if self.at_end() {
+                break;
+            }
         }
+
+        Ok(Module { functions })
     }
 
     /// Returns the current `Token`, without performing safety checks beforehand.
@@ -333,6 +391,10 @@ impl<'a> Parser<'a> {
         } else {
             Ok(self.tokens[self.pos].clone())
         }
+    }
+
+    fn last_location(&self) -> Location {
+        Location::new("filename", 0, 0)
     }
 
     /// Advances the position, and returns an empty `Result` whose error
@@ -367,6 +429,7 @@ impl<'a> Parser<'a> {
 
     /// Parses the prototype of a function, whether external or user-defined.
     fn parse_prototype(&mut self) -> Result<Prototype, &'static str> {
+        let location = self.last_location();
         let (id, is_operator, precedence) = match self.curr() {
             Ident(id) => {
                 self.advance()?;
@@ -422,13 +485,13 @@ impl<'a> Parser<'a> {
         };
 
         match self.curr() {
-            LParen => (),
+            ParenLeft => (),
             _ => return Err("Expected '(' character in prototype declaration."),
         }
 
         self.advance()?;
 
-        if let RParen = self.curr() {
+        if let ParenRight = self.curr() {
             self.advance();
 
             return Ok(Prototype {
@@ -436,6 +499,7 @@ impl<'a> Parser<'a> {
                 args: vec![],
                 is_op: is_operator,
                 prec: precedence,
+                location,
             });
         }
 
@@ -450,7 +514,7 @@ impl<'a> Parser<'a> {
             self.advance()?;
 
             match self.curr() {
-                RParen => {
+                ParenRight => {
                     self.advance();
                     break;
                 }
@@ -466,6 +530,7 @@ impl<'a> Parser<'a> {
             args,
             is_op: is_operator,
             prec: precedence,
+            location,
         })
     }
 
@@ -478,28 +543,13 @@ impl<'a> Parser<'a> {
         let proto = self.parse_prototype()?;
 
         // Parse body of function
-        let body = self.parse_expr()?;
+        // let body = self.parse_expr()?;
+        let body = self.parse_block()?;
 
         // Return new function
         Ok(Function {
             prototype: proto,
             body: Some(body),
-            is_anon: false,
-        })
-    }
-
-    /// Parses an external function declaration.
-    fn parse_extern(&mut self) -> Result<Function, &'static str> {
-        // Eat 'extern' keyword
-        self.pos += 1;
-
-        // Parse signature of extern function
-        let proto = self.parse_prototype()?;
-
-        Ok(Function {
-            prototype: proto,
-            body: None,
-            is_anon: false,
         })
     }
 
@@ -517,6 +567,7 @@ impl<'a> Parser<'a> {
         match self.curr() {
             Number(nb) => {
                 self.advance();
+                println!("Found number {}", nb);
                 Ok(Expr::Number(nb))
             }
             _ => Err("Expected number literal."),
@@ -526,7 +577,7 @@ impl<'a> Parser<'a> {
     /// Parses an expression enclosed in parenthesis.
     fn parse_paren_expr(&mut self) -> Result<Expr, &'static str> {
         match self.current()? {
-            LParen => (),
+            ParenLeft => (),
             _ => return Err("Expected '(' character at start of parenthesized expression."),
         }
 
@@ -535,7 +586,7 @@ impl<'a> Parser<'a> {
         let expr = self.parse_expr()?;
 
         match self.current()? {
-            RParen => (),
+            ParenRight => (),
             _ => return Err("Expected ')' character at end of parenthesized expression."),
         }
 
@@ -556,10 +607,10 @@ impl<'a> Parser<'a> {
         }
 
         match self.curr() {
-            LParen => {
+            ParenLeft => {
                 self.advance()?;
 
-                if let RParen = self.curr() {
+                if let ParenRight = self.curr() {
                     return Ok(Expr::Call {
                         fn_name: id,
                         args: vec![],
@@ -573,7 +624,7 @@ impl<'a> Parser<'a> {
 
                     match self.current()? {
                         Comma => (),
-                        RParen => break,
+                        ParenRight => break,
                         _ => return Err("Expected ',' character in function call."),
                     }
 
@@ -641,93 +692,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parses a conditional if..then..else expression.
-    fn parse_conditional_expr(&mut self) -> Result<Expr, &'static str> {
-        // eat 'if' token
-        self.advance()?;
-
-        let cond = self.parse_expr()?;
-
-        // eat 'then' token
-        match self.current() {
-            Ok(Then) => self.advance()?,
-            _ => return Err("Expected 'then' keyword."),
-        }
-
-        let then = self.parse_expr()?;
-
-        // eat 'else' token
-        match self.current() {
-            Ok(Else) => self.advance()?,
-            _ => return Err("Expected 'else' keyword."),
-        }
-
-        let otherwise = self.parse_expr()?;
-
-        Ok(Expr::Conditional {
-            cond: Box::new(cond),
-            consequence: Box::new(then),
-            alternative: Box::new(otherwise),
-        })
-    }
-
-    /// Parses a loop for..in.. expression.
-    fn parse_for_expr(&mut self) -> Result<Expr, &'static str> {
-        // eat 'for' token
-        self.advance()?;
-
-        let name = match self.curr() {
-            Ident(n) => n,
-            _ => return Err("Expected identifier in for loop."),
-        };
-
-        // eat identifier
-        self.advance()?;
-
-        // eat '=' token
-        match self.curr() {
-            Op('=') => self.advance()?,
-            _ => return Err("Expected '=' character in for loop."),
-        }
-
-        let start = self.parse_expr()?;
-
-        // eat ',' token
-        match self.current()? {
-            Comma => self.advance()?,
-            _ => return Err("Expected ',' character in for loop."),
-        }
-
-        let end = self.parse_expr()?;
-
-        // parse (optional) step expression
-        let step = match self.current()? {
-            Comma => {
-                self.advance()?;
-
-                Some(self.parse_expr()?)
-            }
-
-            _ => None,
-        };
-
-        // eat 'in' token
-        match self.current()? {
-            In => self.advance()?,
-            _ => return Err("Expected 'in' keyword in for loop."),
-        }
-
-        let body = self.parse_expr()?;
-
-        Ok(Expr::For {
-            var_name: name,
-            start: Box::new(start),
-            end: Box::new(end),
-            step: step.map(Box::new),
-            body: Box::new(body),
-        })
-    }
-
     /// Parses a var..in expression.
     fn parse_var_expr(&mut self) -> Result<Expr, &'static str> {
         // eat 'var' token
@@ -743,6 +707,14 @@ impl<'a> Parser<'a> {
             };
 
             self.advance()?;
+
+            let _var_type = match self.curr() {
+                AngleLeft => {
+                    println!("AngleLeft");
+                    self.parse_var_type()?
+                }
+                _ => VarType::new(),
+            };
 
             // read (optional) initializer
             let initializer = match self.curr() {
@@ -760,20 +732,77 @@ impl<'a> Parser<'a> {
                 Comma => {
                     self.advance()?;
                 }
-                In => {
-                    self.advance()?;
+                Semicolon => {
+                    println!("Semicolon");
                     break;
                 }
                 _ => return Err("Expected comma or 'in' keyword in variable declaration."),
             }
         }
 
-        // parse body
-        let body = self.parse_expr()?;
+        Ok(Expr::VarIn { variables })
+    }
 
-        Ok(Expr::VarIn {
-            variables,
-            body: Box::new(body),
+    fn parse_var_type(&mut self) -> Result<VarType, &'static str> {
+        // skip <
+        self.advance();
+
+        let mut shape = Vec::new();
+        loop {
+            match self.curr() {
+                Token::Number(number) => {
+                    shape.push(number as usize);
+                    self.advance();
+                }
+                Token::Comma => {
+                    self.advance();
+                }
+                Token::AngleRight => {
+                    self.advance();
+                    break;
+                }
+                _ => return Err("Cannot define variable type"),
+            }
+        }
+
+        Ok(VarType { shape })
+    }
+
+    fn parse_tensor_literal_expr(&mut self) -> Result<Expr, &'static str> {
+        let location = self.last_location();
+        // eat [
+        self.advance();
+        let mut values = Vec::new();
+        let mut dims = Vec::new();
+        loop {
+            match self.curr() {
+                Token::TensorBegin => {
+                    println!("Found TensorBegin");
+                    values.push(self.parse_tensor_literal_expr()?);
+                }
+                Token::Comma => {
+                    println!("Found comma");
+                    self.advance();
+                }
+                Token::Number(_) => {
+                    println!("Found TensorNumber");
+                    values.push(self.parse_nb_expr()?);
+                }
+                Token::TensorEnd => {
+                    println!("Found TensorEnd");
+                    self.advance();
+                    break;
+                }
+                _ => return Err("Cannot parse tensor expression"),
+            }
+            // TODO: handling error siutation
+        }
+        dims.push(values.len());
+
+        Ok(Expr::Tensor {
+            location,
+            values,
+            dims,
         })
     }
 
@@ -782,31 +811,64 @@ impl<'a> Parser<'a> {
         match self.curr() {
             Ident(_) => self.parse_id_expr(),
             Number(_) => self.parse_nb_expr(),
-            LParen => self.parse_paren_expr(),
-            If => self.parse_conditional_expr(),
-            For => self.parse_for_expr(),
+            ParenLeft => self.parse_paren_expr(),
             Var => self.parse_var_expr(),
+            TensorBegin => self.parse_tensor_literal_expr(),
             _ => Err("Unknown expression."),
         }
     }
 
-    /// Parses a top-level expression and makes an anonymous function out of it,
-    /// for easier compilation.
-    fn parse_toplevel_expr(&mut self) -> Result<Function, &'static str> {
-        match self.parse_expr() {
-            Ok(expr) => Ok(Function {
-                prototype: Prototype {
-                    name: ANONYMOUS_FUNCTION_NAME.to_string(),
-                    args: vec![],
-                    is_op: false,
-                    prec: 0,
-                },
-                body: Some(expr),
-                is_anon: true,
-            }),
+    fn parse_block(&mut self) -> Result<Expr, &'static str> {
+        // skip {,
+        // TODO: check that block starts with bracket
+        self.advance();
 
-            Err(err) => Err(err),
+        let mut expressions = Vec::new();
+        loop {
+            match self.curr() {
+                Token::BlockRight => {
+                    println!("BlockRight");
+                    self.advance();
+                    break;
+                }
+                Token::Semicolon => {
+                    println!("Semicolon");
+                }
+                Token::Return => {
+                    let expr = self.parse_return()?;
+                    expressions.push(Box::new(expr));
+                    println!("Return");
+                }
+                Comment => {
+                    self.advance();
+                    continue;
+                }
+                _ => {
+                    let expr = self.parse_primary()?;
+                    expressions.push(Box::new(expr));
+                }
+            }
+            self.advance();
         }
+
+        Ok(Expr::ExprList { expressions })
+    }
+
+    fn parse_return(&mut self) -> Result<Expr, &'static str> {
+        let location = self.last_location();
+        // skip return
+        self.advance();
+
+        let expression = match self.curr() {
+            // TODO: argument is optional, no need to return 0 if no argument
+            Token::Semicolon => Box::new(Expr::Number(0.0)),
+            _ => Box::new(self.parse_expr()?),
+        };
+
+        Ok(Expr::Return {
+            location,
+            expression,
+        })
     }
 }
 
@@ -814,6 +876,9 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     dbg!(args.clone());
     let filename = args[1].clone();
+    if filename.is_empty() {
+        panic!("Cannot find file to read");
+    }
     let content = std::fs::read_to_string(filename).unwrap();
     let mut prec = HashMap::with_capacity(6);
 
@@ -823,14 +888,10 @@ fn main() {
     prec.insert('-', 20);
     prec.insert('*', 40);
     prec.insert('/', 40);
-    match Parser::new(content, &mut prec).parse() {
-        Ok(fun) => {
-            let is_anon = fun.is_anon;
-
-            if is_anon {
-                println!("-> Expression parsed: \n{:?}\n", fun.body);
-            } else {
-                println!("-> Function parsed: \n{:?}\n", fun);
+    match Parser::new(content, &mut prec).parse_module() {
+        Ok(module) => {
+            for fun in module.functions {
+                println!("-> Function parsed: \n{:#?}\n", fun);
             }
         }
         Err(err) => {
