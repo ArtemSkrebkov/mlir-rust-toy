@@ -1,26 +1,35 @@
-use std::ffi::CStr;
+pub mod parser;
+
+use std::collections::HashMap;
+use std::ffi::{CStr, CString};
 
 use mlir_sys::{
     mlirContextCreate, mlirContextGetOrLoadDialect, mlirDialectHandleGetNamespace,
-    mlirGetDialectHandle__std__,
+    mlirGetDialectHandle__std__, mlirLocationUnknownGet, mlirNoneTypeGet, mlirOperationCreate,
+    mlirOperationStateGet, mlirStringRefCreateFromCString,
 };
-use mlir_sys::{MlirContext, MlirDialectHandle};
+use mlir_sys::{
+    MlirContext, MlirDialectHandle, MlirLocation, MlirOperation, MlirOperationState, MlirType,
+    MlirValue,
+};
 
+use crate::parser::Expr::{Binary, Call, ExprList, Number, Return, Tensor, VarDecl};
+use parser::{Expr, Function, Module, Prototype};
 pub trait Dialect {
     fn get_name(&self) -> String;
 }
 
 pub struct Context {
-    context: MlirContext,
+    instance: MlirContext,
     dialects: Vec<Box<dyn Dialect>>,
 }
 
 impl Context {
     pub fn new() -> Self {
         unsafe {
-            let context = mlirContextCreate();
+            let instance = mlirContextCreate();
             Self {
-                context,
+                instance,
                 dialects: Vec::new(),
             }
         }
@@ -42,12 +51,18 @@ impl Default for Context {
 }
 pub struct ToyDialect {
     // context: &'a Context,
-// name
+    // name
+    ops: Vec<Op>,
 }
 
 impl ToyDialect {
     pub fn new(_context: &Context) -> Self {
-        Self {}
+        // let ops = Vec::new();
+        let ops = vec![
+            Op::Constant(ConstantOp::default()),
+            Op::Print(PrintOp::default()),
+        ];
+        Self { ops }
     }
 }
 
@@ -66,7 +81,7 @@ impl StandardDialect {
         unsafe {
             let std_handle = mlirGetDialectHandle__std__();
             let std = mlirContextGetOrLoadDialect(
-                _context.context,
+                _context.instance,
                 mlirDialectHandleGetNamespace(std_handle),
             );
             Self { std_handle }
@@ -82,6 +97,288 @@ impl Dialect for StandardDialect {
             let str_slice: &str = c_str.to_str().unwrap();
             let str_buf: String = str_slice.to_owned();
             str_buf
+        }
+    }
+}
+
+enum Op {
+    Constant(ConstantOp),
+    Print(PrintOp),
+}
+
+#[derive(Clone)]
+struct OperationState {
+    instance: MlirOperationState,
+}
+
+impl OperationState {
+    fn new(name: &str, location: Location) -> Self {
+        let string = CString::new(name).unwrap();
+        let reference = unsafe { mlirStringRefCreateFromCString(string.as_ptr()) };
+        let instance = unsafe { mlirOperationStateGet(reference, location.instance) };
+
+        Self { instance }
+    }
+}
+
+#[derive(Clone)]
+pub struct Operation {
+    state: OperationState,
+}
+
+impl Operation {
+    fn new(state: OperationState) -> Self {
+        Self { state }
+    }
+}
+
+pub trait OneRegion {
+    fn push_back(&mut self, operation: Box<Operation>);
+}
+
+#[derive(Clone)]
+struct Block {
+    operations: Vec<Box<Operation>>,
+}
+
+impl Default for Block {
+    fn default() -> Self {
+        Self {
+            operations: Vec::new(),
+        }
+    }
+}
+
+struct ConstantOp {
+    name: String,
+}
+
+impl ConstantOp {
+    pub fn new() -> Self {
+        let name = String::from("Constant");
+        Self { name }
+    }
+}
+
+impl Default for ConstantOp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+struct PrintOp {
+    name: String,
+}
+
+impl PrintOp {
+    pub fn new() -> Self {
+        let name = String::from("Print");
+        Self { name }
+    }
+}
+
+impl Default for PrintOp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+struct Location {
+    instance: MlirLocation,
+}
+
+impl Location {
+    pub fn new(context: Context) -> Self {
+        let instance = unsafe { mlirLocationUnknownGet(context.instance) };
+        Self { instance }
+    }
+}
+
+#[derive(Clone)]
+struct ModuleOp {
+    module: MlirOperation,
+    block: Block,
+}
+
+impl ModuleOp {
+    pub fn new() -> Self {
+        // FIXME: should be shared between all ops
+        let context = Context::default();
+        let location = Location::new(context);
+        Self::new_with_location(location)
+    }
+
+    pub fn new_with_location(location: Location) -> Self {
+        unsafe {
+            let mut state = OperationState::new("builtin.module", location);
+            let p_state: *mut MlirOperationState = &mut state.instance;
+            let module = mlirOperationCreate(p_state);
+
+            Self {
+                module,
+                block: Block::default(),
+            }
+        }
+    }
+}
+
+impl OneRegion for ModuleOp {
+    fn push_back(&mut self, operation: Box<Operation>) {
+        self.block.operations.push(operation);
+    }
+}
+
+impl Default for ModuleOp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+struct FuncOp {
+    function: MlirOperation,
+    block: Block,
+}
+
+impl FuncOp {
+    pub fn new_with_location(location: Location) -> Self {
+        unsafe {
+            let mut state = OperationState::new("builtin.func", location);
+            let p_state: *mut MlirOperationState = &mut state.instance;
+            let function = mlirOperationCreate(p_state);
+
+            Self {
+                function,
+                block: Block::default(),
+            }
+        }
+    }
+}
+
+struct OpBuilder {}
+
+impl OpBuilder {
+    pub fn new(context: Context) -> Self {
+        Self {}
+    }
+
+    pub fn unknown_loc(&self) -> Location {
+        let context = Context::default();
+        Location::new(context)
+    }
+}
+
+#[derive(Clone)]
+struct Type {
+    instance: MlirType,
+}
+
+impl Type {
+    fn new(context: Context) -> Self {
+        let instance = unsafe { mlirNoneTypeGet(context.instance) };
+        Self { instance }
+    }
+}
+
+struct Value {
+    instance: MlirValue,
+}
+
+struct MLIRGen {
+    module: ModuleOp,
+    builder: OpBuilder,
+}
+
+impl MLIRGen {
+    pub fn new(context: Context) -> Self {
+        Self {
+            module: ModuleOp::default(),
+            builder: OpBuilder::new(context),
+        }
+    }
+    // TODO: pass parsed result
+    pub fn mlir_gen(&mut self, module_ast: Module) -> ModuleOp {
+        self.module = ModuleOp::new_with_location(self.builder.unknown_loc());
+
+        // TODO: implement Iterator for Module?
+        for f in module_ast.functions {
+            let func = self.mlir_gen_function(f);
+            // add func into self.module
+        }
+
+        // TODO: verify self.module
+
+        self.module.clone()
+    }
+
+    fn mlir_gen_function(&mut self, function_ast: Function) -> FuncOp {
+        // varScopeTable
+        let var_scope: HashMap<&str, Value> = HashMap::new();
+        let function: FuncOp = self.mlir_gen_prototype(function_ast.prototype.clone());
+
+        let entry_block = function.block.clone();
+        // TODO: getter for prototype
+        let proto_args = function_ast.prototype.args.clone();
+        // TODO: declare all the function arguments in the symbol table
+        // TODO: implement builder method
+        // self.builder.set_insertion_point_to_start(entry_block);
+
+        self.mlir_gen_expression(function_ast.body.unwrap());
+        // function.erase();
+
+        // TODO: handle return op
+
+        function
+    }
+
+    fn mlir_gen_prototype(&mut self, prototype_ast: Prototype) -> FuncOp {
+        // FIXME: construct location from AST location
+        let location = Location::new(Context::default());
+        // FIXME: convert VarType to mlirType
+        // let arg_types = vec![Type::new(Context::default()); prototype_ast.args.len()];
+        // let func_type = self.builder.get_function_type(arg_types, llvm::None);
+
+        // FIXME: create function op with prototype name and funcType
+        FuncOp::new_with_location(location)
+    }
+
+    fn mlir_gen_expression(&mut self, expr: Expr) {
+        match expr {
+            ExprList { expressions } => {
+                for expr in expressions {
+                    self.mlir_gen_expression(*expr.clone());
+                    // println!("ExprList: {:#?}", expr);
+                    println!("ExprList");
+                }
+            }
+            VarDecl { name, value } => {
+                println!("VarDecl: {:#?} {}", value, name);
+            }
+            Tensor {
+                location,
+                values,
+                dims,
+            } => {
+                println!("Tensor: ");
+            }
+            Number(num) => {
+                println!("Num {}", num);
+            }
+            Call { fn_name, args } => {
+                println!("Call");
+            }
+            Return {
+                location,
+                expression,
+            } => {
+                println!("Return");
+            }
+            Binary { op, left, right } => {
+                println!("Binary");
+            }
+
+            _ => {
+                panic!("Unknown expression");
+            }
         }
     }
 }
@@ -108,5 +405,29 @@ mod tests {
 
         let std_dialect = StandardDialect::new(&context);
         context.load_dialect(Box::new(std_dialect));
+    }
+
+    #[test]
+    fn generate_mlir() {
+        let filename = "ast.toy".to_string();
+        if filename.is_empty() {
+            panic!("Cannot find file to read");
+        }
+        let content = std::fs::read_to_string(filename).unwrap();
+        let mut prec = HashMap::with_capacity(6);
+
+        prec.insert('=', 2);
+        prec.insert('<', 10);
+        prec.insert('+', 20);
+        prec.insert('-', 20);
+        prec.insert('*', 40);
+        prec.insert('/', 40);
+
+        let context = Context::default();
+        let module = parser::Parser::new(content, &mut prec)
+            .parse_module()
+            .unwrap();
+        let module = MLIRGen::new(context).mlir_gen(module);
+        assert!(module.block.operations.is_empty());
     }
 }
