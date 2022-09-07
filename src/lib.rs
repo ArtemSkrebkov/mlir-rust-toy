@@ -6,7 +6,7 @@ use std::ffi::{CStr, CString};
 use mlir_sys::{
     mlirContextCreate, mlirContextGetOrLoadDialect, mlirDialectHandleGetNamespace,
     mlirGetDialectHandle__std__, mlirLocationUnknownGet, mlirNoneTypeGet, mlirOperationCreate,
-    mlirOperationStateGet, mlirStringRefCreateFromCString,
+    mlirOperationGetResult, mlirOperationStateGet, mlirStringRefCreateFromCString,
 };
 use mlir_sys::{
     MlirContext, MlirDialectHandle, MlirLocation, MlirOperation, MlirOperationState, MlirType,
@@ -52,15 +52,15 @@ impl Default for Context {
 pub struct ToyDialect {
     // context: &'a Context,
     // name
-    ops: Vec<Op>,
+    ops: Vec<Box<dyn Op>>,
 }
 
 impl ToyDialect {
     pub fn new(_context: &Context) -> Self {
         // let ops = Vec::new();
-        let ops = vec![
-            Op::Constant(ConstantOp::default()),
-            Op::Print(PrintOp::default()),
+        let ops: Vec<Box<dyn Op>> = vec![
+            Box::new(ConstantOp::default()),
+            Box::new(PrintOp::default()),
         ];
         Self { ops }
     }
@@ -99,11 +99,6 @@ impl Dialect for StandardDialect {
             str_buf
         }
     }
-}
-
-enum Op {
-    Constant(ConstantOp),
-    Print(PrintOp),
 }
 
 #[derive(Clone)]
@@ -151,17 +146,35 @@ impl Default for Block {
 
 struct ConstantOp {
     name: String,
+    instance: MlirOperation,
 }
 
 impl ConstantOp {
     pub fn new() -> Self {
-        let name = String::from("Constant");
-        Self { name }
+        Self::new_with_location(Location::new(Context::default()))
+    }
+
+    pub fn new_with_location(location: Location) -> Self {
+        unsafe {
+            // FIXME: duplication toy.constant
+            let name = String::from("toy.constant");
+            let mut state = OperationState::new("toy.constant", location);
+            let p_state: *mut MlirOperationState = &mut state.instance;
+            let instance = mlirOperationCreate(p_state);
+
+            Self { name, instance }
+        }
     }
 }
 
 impl Default for ConstantOp {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Op for ConstantOp {
+    fn build(&self) -> Self {
         Self::new()
     }
 }
@@ -180,6 +193,20 @@ impl PrintOp {
 impl Default for PrintOp {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Op for PrintOp {
+    fn build(&self) -> Self {
+        Self::new()
+    }
+}
+
+impl From<ConstantOp> for Value {
+    fn from(op: ConstantOp) -> Self {
+        // use op to construct Value
+        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
+        Value::new(instance)
     }
 }
 
@@ -254,6 +281,11 @@ impl FuncOp {
     }
 }
 
+pub trait Op {
+    fn build(&self) -> Self
+    where
+        Self: Sized;
+}
 struct OpBuilder {}
 
 impl OpBuilder {
@@ -264,6 +296,10 @@ impl OpBuilder {
     pub fn unknown_loc(&self) -> Location {
         let context = Context::default();
         Location::new(context)
+    }
+
+    pub fn create_operation<OpTy: Op>(&self, op: OpTy) -> OpTy {
+        op.build()
     }
 }
 
@@ -281,6 +317,13 @@ impl Type {
 
 struct Value {
     instance: MlirValue,
+}
+
+impl Value {
+    // TODO: make it available only for crate but not for user
+    pub fn new(instance: MlirValue) -> Value {
+        Self { instance }
+    }
 }
 
 struct MLIRGen {
@@ -342,6 +385,9 @@ impl MLIRGen {
     }
 
     fn mlir_gen_expression(&mut self, expr: Expr) {
+        // NB: this clone is used for collect_data method
+        // there should be a way to avoid this
+        let clone_expr = expr.clone();
         match expr {
             ExprList { expressions } => {
                 for expr in expressions {
@@ -352,6 +398,7 @@ impl MLIRGen {
             }
             VarDecl { name, value } => {
                 println!("VarDecl: {:#?} {}", value, name);
+                // expr
             }
             Tensor {
                 location,
@@ -359,6 +406,12 @@ impl MLIRGen {
                 dims,
             } => {
                 println!("Tensor: ");
+                let size = dims.iter().product();
+                let mut data: Vec<f64> = Vec::new();
+                data.reserve(size);
+                self.collect_data(clone_expr, &mut data);
+                let ty = Type::new(Context::default());
+                let value = Value::from(self.builder.create_operation(ConstantOp::new()));
             }
             Number(num) => {
                 println!("Num {}", num);
@@ -378,6 +431,26 @@ impl MLIRGen {
 
             _ => {
                 panic!("Unknown expression");
+            }
+        }
+    }
+
+    fn collect_data(&self, expr: Expr, data: &mut Vec<f64>) {
+        match expr {
+            Tensor {
+                location: _,
+                values,
+                dims: _,
+            } => {
+                for v in values {
+                    self.collect_data(v.clone(), data);
+                }
+            }
+            Number(num) => {
+                data.push(num);
+            }
+            _ => {
+                panic!("Unexpected expression");
             }
         }
     }
