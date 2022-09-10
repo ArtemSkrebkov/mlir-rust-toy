@@ -13,7 +13,7 @@ use mlir_sys::{
     MlirValue,
 };
 
-use crate::parser::Expr::{Binary, Call, ExprList, Number, Return, Tensor, VarDecl};
+use crate::parser::Expr::{Binary, Call, ExprList, Number, Return, Tensor, VarDecl, Variable};
 use parser::{Expr, Function, Module, Prototype};
 pub trait Dialect {
     fn get_name(&self) -> String;
@@ -58,10 +58,7 @@ pub struct ToyDialect {
 impl ToyDialect {
     pub fn new(_context: &Context) -> Self {
         // let ops = Vec::new();
-        let ops: Vec<Box<dyn Op>> = vec![
-            Box::new(ConstantOp::default()),
-            Box::new(PrintOp::default()),
-        ];
+        let ops: Vec<Box<dyn Op>> = vec![Box::new(PrintOp::default())];
         Self { ops }
     }
 }
@@ -147,14 +144,11 @@ impl Default for Block {
 struct ConstantOp {
     name: String,
     instance: MlirOperation,
+    value: f64,
 }
 
 impl ConstantOp {
-    pub fn new() -> Self {
-        Self::new_with_location(Location::new(Context::default()))
-    }
-
-    pub fn new_with_location(location: Location) -> Self {
+    pub fn new(location: Location, value: f64) -> Self {
         unsafe {
             // FIXME: duplication toy.constant
             let name = String::from("toy.constant");
@@ -162,23 +156,190 @@ impl ConstantOp {
             let p_state: *mut MlirOperationState = &mut state.instance;
             let instance = mlirOperationCreate(p_state);
 
-            Self { name, instance }
+            Self {
+                name,
+                instance,
+                value,
+            }
         }
     }
 }
 
-impl Default for ConstantOp {
-    fn default() -> Self {
-        Self::new()
+impl From<ConstantOp> for Value {
+    fn from(op: ConstantOp) -> Self {
+        // use op to construct Value
+        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
+        Value::new(instance)
     }
 }
 
-impl Op for ConstantOp {
-    fn build(&self) -> Self {
-        Self::new()
+struct TransposeOp {
+    name: String,
+    instance: MlirOperation,
+    input: Value,
+}
+
+// TODO: implementation looks the same to ConstantOp, besides the name
+impl TransposeOp {
+    pub fn new(location: Location, input: Value) -> Self {
+        unsafe {
+            // FIXME: duplication toy.constant
+            let name = String::from("toy.transpose");
+            let mut state = OperationState::new("toy.transpose", location);
+            let p_state: *mut MlirOperationState = &mut state.instance;
+            let instance = mlirOperationCreate(p_state);
+
+            Self {
+                name,
+                instance,
+                input,
+            }
+        }
     }
 }
 
+impl From<TransposeOp> for Value {
+    fn from(op: TransposeOp) -> Self {
+        // use op to construct Value
+        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
+        Value::new(instance)
+    }
+}
+
+struct GenericCallOp {
+    name: String,
+    instance: MlirOperation,
+    callee: String,
+    operands: Vec<Value>,
+}
+
+// TODO: implementation looks the same to ConstantOp, besides the name
+impl GenericCallOp {
+    pub fn new(location: Location, callee: String, operands: Vec<Value>) -> Self {
+        unsafe {
+            // FIXME: duplication toy.constant
+            let name = String::from("toy.generic_call");
+            let mut state = OperationState::new("toy.generic_call", location);
+            let p_state: *mut MlirOperationState = &mut state.instance;
+            let instance = mlirOperationCreate(p_state);
+
+            Self {
+                name,
+                instance,
+                callee,
+                operands,
+            }
+        }
+    }
+}
+
+impl From<GenericCallOp> for Value {
+    fn from(op: GenericCallOp) -> Self {
+        // use op to construct Value
+        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
+        Value::new(instance)
+    }
+}
+
+struct ReturnOp {
+    name: String,
+    instance: MlirOperation,
+    input: Value,
+}
+
+impl ReturnOp {
+    pub fn new(location: Location, input: Value) -> Self {
+        unsafe {
+            // FIXME: duplication toy.constant
+            let name = String::from("toy.return");
+            let mut state = OperationState::new("toy.return", location);
+            let p_state: *mut MlirOperationState = &mut state.instance;
+            let instance = mlirOperationCreate(p_state);
+
+            Self {
+                name,
+                instance,
+                input,
+            }
+        }
+    }
+}
+
+impl From<ReturnOp> for Value {
+    fn from(op: ReturnOp) -> Self {
+        // use op to construct Value
+        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
+        Value::new(instance)
+    }
+}
+
+struct AddOp {
+    name: String,
+    instance: MlirOperation,
+    lhs: Value,
+    rhs: Value,
+}
+
+impl AddOp {
+    pub fn new(location: Location, lhs: Value, rhs: Value) -> Self {
+        unsafe {
+            // FIXME: duplication toy.constant
+            let name = String::from("toy.add");
+            let mut state = OperationState::new("toy.add", location);
+            let p_state: *mut MlirOperationState = &mut state.instance;
+            let instance = mlirOperationCreate(p_state);
+
+            Self {
+                name,
+                instance,
+                lhs,
+                rhs,
+            }
+        }
+    }
+}
+
+impl From<AddOp> for Value {
+    fn from(op: AddOp) -> Self {
+        // use op to construct Value
+        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
+        Value::new(instance)
+    }
+}
+
+struct MulOp {
+    name: String,
+    instance: MlirOperation,
+    lhs: Value,
+    rhs: Value,
+}
+
+impl MulOp {
+    pub fn new(location: Location, lhs: Value, rhs: Value) -> Self {
+        unsafe {
+            // FIXME: duplication toy.constant
+            let name = String::from("toy.mul");
+            let mut state = OperationState::new("toy.mul", location);
+            let p_state: *mut MlirOperationState = &mut state.instance;
+            let instance = mlirOperationCreate(p_state);
+
+            Self {
+                name,
+                instance,
+                lhs,
+                rhs,
+            }
+        }
+    }
+}
+
+impl From<MulOp> for Value {
+    fn from(op: MulOp) -> Self {
+        // use op to construct Value
+        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
+        Value::new(instance)
+    }
+}
 struct PrintOp {
     name: String,
 }
@@ -199,14 +360,6 @@ impl Default for PrintOp {
 impl Op for PrintOp {
     fn build(&self) -> Self {
         Self::new()
-    }
-}
-
-impl From<ConstantOp> for Value {
-    fn from(op: ConstantOp) -> Self {
-        // use op to construct Value
-        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
-        Value::new(instance)
     }
 }
 
@@ -286,22 +439,6 @@ pub trait Op {
     where
         Self: Sized;
 }
-struct OpBuilder {}
-
-impl OpBuilder {
-    pub fn new(context: Context) -> Self {
-        Self {}
-    }
-
-    pub fn unknown_loc(&self) -> Location {
-        let context = Context::default();
-        Location::new(context)
-    }
-
-    pub fn create_operation<OpTy: Op>(&self, op: OpTy) -> OpTy {
-        op.build()
-    }
-}
 
 #[derive(Clone)]
 struct Type {
@@ -315,6 +452,7 @@ impl Type {
     }
 }
 
+#[derive(Clone)]
 struct Value {
     instance: MlirValue,
 }
@@ -328,19 +466,19 @@ impl Value {
 
 struct MLIRGen {
     module: ModuleOp,
-    builder: OpBuilder,
+    symbol_table: HashMap<String, Value>,
 }
 
 impl MLIRGen {
     pub fn new(context: Context) -> Self {
         Self {
             module: ModuleOp::default(),
-            builder: OpBuilder::new(context),
+            symbol_table: HashMap::new(),
         }
     }
     // TODO: pass parsed result
     pub fn mlir_gen(&mut self, module_ast: Module) -> ModuleOp {
-        self.module = ModuleOp::new_with_location(self.builder.unknown_loc());
+        self.module = ModuleOp::new_with_location(Location::new(Context::default()));
 
         // TODO: implement Iterator for Module?
         for f in module_ast.functions {
@@ -384,7 +522,11 @@ impl MLIRGen {
         FuncOp::new_with_location(location)
     }
 
-    fn mlir_gen_expression(&mut self, expr: Expr) {
+    fn declare(&mut self, name: String, value: Value) {
+        self.symbol_table.insert(name, value);
+    }
+
+    fn mlir_gen_expression(&mut self, expr: Expr) -> Result<Value, &'static str> {
         // NB: this clone is used for collect_data method
         // there should be a way to avoid this
         let clone_expr = expr.clone();
@@ -395,10 +537,23 @@ impl MLIRGen {
                     // println!("ExprList: {:#?}", expr);
                     println!("ExprList");
                 }
+                Err("ExprList not implemented")
             }
             VarDecl { name, value } => {
                 println!("VarDecl: {:#?} {}", value, name);
-                // expr
+                let value = self.mlir_gen_expression(*value).unwrap();
+                // TODO: reshape op
+                // declare variable in the symbol table
+                self.declare(name, value.clone());
+                Ok(value)
+            }
+            Variable(name) => {
+                if self.symbol_table.contains_key(&name) {
+                    let value = (*self.symbol_table.get(&name).unwrap()).clone();
+                    return Ok(value);
+                }
+                Err("Variable is not found")
+                // extract variable from symbol table
             }
             Tensor {
                 location,
@@ -411,24 +566,51 @@ impl MLIRGen {
                 data.reserve(size);
                 self.collect_data(clone_expr, &mut data);
                 let ty = Type::new(Context::default());
-                let value = Value::from(self.builder.create_operation(ConstantOp::new()));
+                // TODO: contruct ConstanOp with array
+                Ok(Value::from(ConstantOp::new(
+                    Location::new(Context::default()),
+                    data[0],
+                )))
             }
             Number(num) => {
-                println!("Num {}", num);
+                let location = Location::new(Context::default());
+                Ok(Value::from(ConstantOp::new(location, num)))
             }
             Call { fn_name, args } => {
-                println!("Call");
+                let location = Location::new(Context::default());
+                let mut operands: Vec<Value> = Vec::new();
+                for arg in &args {
+                    let arg = self.mlir_gen_expression(arg.clone()).unwrap();
+                    operands.push(arg);
+                }
+                if fn_name == "transpose" {
+                    if args.len() != 1 {
+                        panic!("MLIR codegen encountered an error: toy.transpose does not accept multiple args");
+                    }
+                    return Ok(Value::from(TransposeOp::new(location, operands[0].clone())));
+                }
+
+                Ok(Value::from(GenericCallOp::new(location, fn_name, operands)))
             }
             Return {
-                location,
+                location: _,
                 expression,
             } => {
-                println!("Return");
-            }
-            Binary { op, left, right } => {
-                println!("Binary");
+                let location = Location::new(Context::default());
+                let value = self.mlir_gen_expression(*expression).unwrap();
+                Ok(Value::from(ReturnOp::new(location, value)))
             }
 
+            Binary { op, left, right } => {
+                let lhs = self.mlir_gen_expression(*left).unwrap();
+                let rhs = self.mlir_gen_expression(*right).unwrap();
+                let location = Location::new(Context::default());
+                match op {
+                    '+' => Ok(Value::from(AddOp::new(location, lhs, rhs))),
+                    '*' => Ok(Value::from(MulOp::new(location, lhs, rhs))),
+                    _ => Err("Invalid binary operation"),
+                }
+            }
             _ => {
                 panic!("Unknown expression");
             }
@@ -481,8 +663,32 @@ mod tests {
     }
 
     #[test]
-    fn generate_mlir() {
-        let filename = "ast.toy".to_string();
+    fn generate_mlir_for_empty_ast() {
+        let filename = "ast_empty.toy".to_string();
+        if filename.is_empty() {
+            panic!("Cannot find file to read");
+        }
+        let content = std::fs::read_to_string(filename).unwrap();
+        let mut prec = HashMap::with_capacity(6);
+
+        prec.insert('=', 2);
+        prec.insert('<', 10);
+        prec.insert('+', 20);
+        prec.insert('-', 20);
+        prec.insert('*', 40);
+        prec.insert('/', 40);
+
+        let context = Context::default();
+        let module = parser::Parser::new(content, &mut prec)
+            .parse_module()
+            .unwrap();
+        let module = MLIRGen::new(context).mlir_gen(module);
+        assert!(module.block.operations.is_empty());
+    }
+
+    #[test]
+    fn generate_mlir_for_ast_tensor() {
+        let filename = "ast_tensor.toy".to_string();
         if filename.is_empty() {
             panic!("Cannot find file to read");
         }

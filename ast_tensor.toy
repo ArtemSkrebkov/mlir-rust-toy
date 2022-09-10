@@ -1,9 +1,4 @@
 # asd
-def multiply_transpose(a, b) {
-  return transpose(a) * transpose(b);
-}
-
-# asd
 def main() {
   var a = [1, 2, 3];
   var b = [3, 4, 5];
