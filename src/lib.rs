@@ -3,14 +3,24 @@ pub mod parser;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 
+use std::rc::Rc;
+
 use mlir_sys::{
-    mlirContextCreate, mlirContextGetOrLoadDialect, mlirDialectHandleGetNamespace,
-    mlirGetDialectHandle__std__, mlirLocationUnknownGet, mlirNoneTypeGet, mlirOperationCreate,
-    mlirOperationGetResult, mlirOperationStateGet, mlirStringRefCreateFromCString,
+    mlirAttributeParseGet, mlirBlockCreate, mlirBlockInsertOwnedOperation,
+    mlirBlockInsertOwnedOperationAfter, mlirContextAppendDialectRegistry, mlirContextCreate,
+    mlirContextGetNumLoadedDialects, mlirContextGetNumRegisteredDialects,
+    mlirContextGetOrLoadDialect, mlirContextSetAllowUnregisteredDialects,
+    mlirDialectHandleGetNamespace, mlirDialectRegistryCreate, mlirGetDialectHandle__std__,
+    mlirIdentifierGet, mlirLocationGetContext, mlirLocationUnknownGet, mlirModuleCreateEmpty,
+    mlirModuleGetBody, mlirModuleGetOperation, mlirNamedAttributeGet, mlirNoneTypeGet,
+    mlirOperationCreate, mlirOperationDump, mlirOperationGetBlock, mlirOperationGetResult,
+    mlirOperationStateAddAttributes, mlirOperationStateAddOwnedRegions, mlirOperationStateGet,
+    mlirRegionAppendOwnedBlock, mlirRegionCreate, mlirRegisterAllDialects,
+    mlirStringRefCreateFromCString,
 };
 use mlir_sys::{
-    MlirContext, MlirDialectHandle, MlirLocation, MlirOperation, MlirOperationState, MlirType,
-    MlirValue,
+    MlirBlock, MlirContext, MlirDialectHandle, MlirLocation, MlirModule, MlirNamedAttribute,
+    MlirOperation, MlirOperationState, MlirRegion, MlirType, MlirValue,
 };
 
 use crate::parser::Expr::{Binary, Call, ExprList, Number, Return, Tensor, VarDecl, Variable};
@@ -28,6 +38,28 @@ impl Context {
     pub fn new() -> Self {
         unsafe {
             let instance = mlirContextCreate();
+            // FIXME: let's register all dialects
+            // let registry = mlirDialectRegistryCreate();
+            println!(
+                "Registered dialects num {}",
+                mlirContextGetNumLoadedDialects(instance)
+            );
+            println!(
+                "Load dialects num {}",
+                mlirContextGetNumLoadedDialects(instance)
+            );
+            // FIXME: make dialects to be registered separately
+            mlirRegisterAllDialects(instance);
+            mlirContextSetAllowUnregisteredDialects(instance, true);
+            println!(
+                "Registered dialects num {}",
+                mlirContextGetNumLoadedDialects(instance)
+            );
+            println!(
+                "Load dialects num {}",
+                mlirContextGetNumLoadedDialects(instance)
+            );
+            // mlirContextAppendDialectRegistry(instance, registry);
             Self {
                 instance,
                 dialects: Vec::new(),
@@ -101,6 +133,8 @@ impl Dialect for StandardDialect {
 #[derive(Clone)]
 struct OperationState {
     instance: MlirOperationState,
+    // NB: to make string live long enough
+    string: CString,
 }
 
 impl OperationState {
@@ -109,18 +143,22 @@ impl OperationState {
         let reference = unsafe { mlirStringRefCreateFromCString(string.as_ptr()) };
         let instance = unsafe { mlirOperationStateGet(reference, location.instance) };
 
-        Self { instance }
+        Self { instance, string }
+        // Self { instance }
     }
 }
 
 #[derive(Clone)]
 pub struct Operation {
     state: OperationState,
+    instance: MlirOperation,
 }
 
 impl Operation {
-    fn new(state: OperationState) -> Self {
-        Self { state }
+    fn new(mut state: OperationState) -> Self {
+        let p_state: *mut MlirOperationState = &mut state.instance;
+        let instance = unsafe { mlirOperationCreate(p_state) };
+        Self { state, instance }
     }
 }
 
@@ -131,20 +169,24 @@ pub trait OneRegion {
 #[derive(Clone)]
 struct Block {
     operations: Vec<Box<Operation>>,
+    instance: MlirBlock,
 }
 
-impl Default for Block {
-    fn default() -> Self {
+impl Block {
+    pub fn new(mlir_block: MlirBlock) -> Self {
         Self {
             operations: Vec::new(),
+            instance: mlir_block,
         }
     }
 }
 
+#[derive(Clone)]
 struct ConstantOp {
     name: String,
     instance: MlirOperation,
     value: f64,
+    state: OperationState,
 }
 
 impl ConstantOp {
@@ -160,6 +202,7 @@ impl ConstantOp {
                 name,
                 instance,
                 value,
+                state,
             }
         }
     }
@@ -173,10 +216,21 @@ impl From<ConstantOp> for Value {
     }
 }
 
+impl From<ConstantOp> for Operation {
+    fn from(op: ConstantOp) -> Self {
+        Self {
+            state: op.state,
+            instance: op.instance,
+        }
+    }
+}
+
+#[derive(Clone)]
 struct TransposeOp {
     name: String,
     instance: MlirOperation,
     input: Value,
+    state: OperationState,
 }
 
 // TODO: implementation looks the same to ConstantOp, besides the name
@@ -193,6 +247,7 @@ impl TransposeOp {
                 name,
                 instance,
                 input,
+                state,
             }
         }
     }
@@ -206,11 +261,22 @@ impl From<TransposeOp> for Value {
     }
 }
 
+impl From<TransposeOp> for Operation {
+    fn from(op: TransposeOp) -> Self {
+        Self {
+            state: op.state,
+            instance: op.instance,
+        }
+    }
+}
+
+#[derive(Clone)]
 struct GenericCallOp {
     name: String,
     instance: MlirOperation,
     callee: String,
     operands: Vec<Value>,
+    state: OperationState,
 }
 
 // TODO: implementation looks the same to ConstantOp, besides the name
@@ -228,6 +294,7 @@ impl GenericCallOp {
                 instance,
                 callee,
                 operands,
+                state,
             }
         }
     }
@@ -238,6 +305,15 @@ impl From<GenericCallOp> for Value {
         // use op to construct Value
         let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
         Value::new(instance)
+    }
+}
+
+impl From<GenericCallOp> for Operation {
+    fn from(op: GenericCallOp) -> Self {
+        Self {
+            state: op.state,
+            instance: op.instance,
+        }
     }
 }
 
@@ -368,7 +444,7 @@ struct Location {
 }
 
 impl Location {
-    pub fn new(context: Context) -> Self {
+    pub fn new(context: &Context) -> Self {
         let instance = unsafe { mlirLocationUnknownGet(context.instance) };
         Self { instance }
     }
@@ -376,60 +452,130 @@ impl Location {
 
 #[derive(Clone)]
 struct ModuleOp {
-    module: MlirOperation,
+    instance: MlirModule,
+    // state: OperationState,
     block: Block,
+    pos: isize,
 }
 
 impl ModuleOp {
-    pub fn new() -> Self {
-        // FIXME: should be shared between all ops
-        let context = Context::default();
-        let location = Location::new(context);
-        Self::new_with_location(location)
-    }
-
-    pub fn new_with_location(location: Location) -> Self {
+    pub fn new(location: Location) -> Self {
         unsafe {
-            let mut state = OperationState::new("builtin.module", location);
-            let p_state: *mut MlirOperationState = &mut state.instance;
-            let module = mlirOperationCreate(p_state);
+            // let mut state = OperationState::new("builtin.module", location);
+            // let p_state: *mut MlirOperationState = &mut state.instance;
+            // let instance = mlirOperationCreate(p_state);
+            let instance = mlirModuleCreateEmpty(location.instance);
+            let mlir_block = mlirModuleGetBody(instance);
 
             Self {
-                module,
-                block: Block::default(),
+                instance,
+                // state,
+                block: Block::new(mlir_block),
+                pos: 0,
             }
         }
+    }
+
+    pub fn dump(&self) {
+        unsafe {
+            let mlir_operation = mlirModuleGetOperation(self.instance);
+            mlirOperationDump(mlir_operation);
+        };
     }
 }
 
 impl OneRegion for ModuleOp {
     fn push_back(&mut self, operation: Box<Operation>) {
+        unsafe {
+            mlirBlockInsertOwnedOperation(self.block.instance, self.pos, operation.instance);
+            self.pos += 1;
+        }
         self.block.operations.push(operation);
     }
 }
 
-impl Default for ModuleOp {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 struct FuncOp {
-    function: MlirOperation,
-    block: Block,
+    instance: MlirOperation,
+    state: OperationState,
+    block: Rc<Block>,
+    name: CString,
 }
 
 impl FuncOp {
-    pub fn new_with_location(location: Location) -> Self {
+    pub fn new(mut location: Location, name: &str) -> Self {
         unsafe {
+            let mlir_context = mlirLocationGetContext(location.instance);
+            let mlir_region = mlirRegionCreate();
+            let p_mlir_region: *const MlirRegion = &mlir_region;
+            let num_args = 0;
+            let mut args = mlirNoneTypeGet(mlir_context);
+            let p_args: *mut MlirType = &mut args;
+
+            let p_locs = &mut location.instance;
+
+            let mlir_block = mlirBlockCreate(num_args, p_args, p_locs);
+            mlirRegionAppendOwnedBlock(mlir_region, mlir_block);
+
+            let string_func_attr = CString::new("() -> ()").unwrap();
+            let func_type_attr = mlirAttributeParseGet(
+                mlir_context,
+                mlirStringRefCreateFromCString(string_func_attr.as_ptr()),
+            );
+
+            let mut string = String::from("\"");
+            string += name;
+            string += "\"";
+
+            let string_func_name_attr = CString::new(string).unwrap();
+            let func_name_attr = mlirAttributeParseGet(
+                mlir_context,
+                mlirStringRefCreateFromCString(string_func_name_attr.as_ptr()),
+            );
+
+            let string_type_id = CString::new("type").unwrap();
+            let type_id = mlirIdentifierGet(
+                mlir_context,
+                mlirStringRefCreateFromCString(string_type_id.as_ptr()),
+            );
+
+            let string_sym_name_id = CString::new("sym_name").unwrap();
+            let sym_name_id = mlirIdentifierGet(
+                mlir_context,
+                mlirStringRefCreateFromCString(string_sym_name_id.as_ptr()),
+            );
+            let func_attrs: [MlirNamedAttribute; 2] = [
+                mlirNamedAttributeGet(type_id, func_type_attr),
+                mlirNamedAttributeGet(sym_name_id, func_name_attr),
+            ];
+            let p_func_attrs = func_attrs.as_ptr();
+
             let mut state = OperationState::new("builtin.func", location);
             let p_state: *mut MlirOperationState = &mut state.instance;
-            let function = mlirOperationCreate(p_state);
+
+            mlirOperationStateAddAttributes(p_state, 2, p_func_attrs);
+            mlirOperationStateAddOwnedRegions(p_state, 1, p_mlir_region);
+
+            let instance = mlirOperationCreate(p_state);
+
+            if instance.ptr.is_null() {
+                panic!("Cannot create FuncOp");
+            }
 
             Self {
-                function,
-                block: Block::default(),
+                instance,
+                state,
+                block: Rc::new(Block::new(mlir_block)),
+                name: string_func_name_attr,
             }
+        }
+    }
+}
+
+impl From<FuncOp> for Operation {
+    fn from(op: FuncOp) -> Self {
+        Self {
+            state: op.state,
+            instance: op.instance,
         }
     }
 }
@@ -446,7 +592,7 @@ struct Type {
 }
 
 impl Type {
-    fn new(context: Context) -> Self {
+    fn new(context: &Context) -> Self {
         let instance = unsafe { mlirNoneTypeGet(context.instance) };
         Self { instance }
     }
@@ -464,25 +610,53 @@ impl Value {
     }
 }
 
+struct OpBuilder {
+    block: Option<Rc<Block>>,
+    pos: isize,
+}
+
+impl<'ctx> OpBuilder {
+    pub fn set_insertion_point(&mut self, block: Rc<Block>, pos: isize) {
+        self.block = Some(block);
+        self.pos = pos;
+    }
+
+    pub fn insert(&mut self, operation: Operation) {
+        unsafe {
+            let block: &Block = self.block.as_ref().unwrap();
+            mlirBlockInsertOwnedOperation(block.instance, self.pos, operation.instance);
+            self.pos += 1;
+        }
+    }
+}
+
 struct MLIRGen {
     module: ModuleOp,
     symbol_table: HashMap<String, Value>,
+    context: Context,
+    builder: OpBuilder,
 }
 
-impl MLIRGen {
+impl<'ctx> MLIRGen {
     pub fn new(context: Context) -> Self {
         Self {
-            module: ModuleOp::default(),
+            module: ModuleOp::new(Location::new(&context)),
             symbol_table: HashMap::new(),
+            context,
+            builder: OpBuilder {
+                block: Option::None,
+                pos: 0,
+            },
         }
     }
     // TODO: pass parsed result
     pub fn mlir_gen(&mut self, module_ast: Module) -> ModuleOp {
-        self.module = ModuleOp::new_with_location(Location::new(Context::default()));
+        self.module = ModuleOp::new(Location::new(&self.context));
 
         // TODO: implement Iterator for Module?
         for f in module_ast.functions {
             let func = self.mlir_gen_function(f);
+            self.module.push_back(Box::new(Operation::from(func)));
             // add func into self.module
         }
 
@@ -502,6 +676,11 @@ impl MLIRGen {
         // TODO: declare all the function arguments in the symbol table
         // TODO: implement builder method
         // self.builder.set_insertion_point_to_start(entry_block);
+        self.builder
+            .set_insertion_point(Rc::clone(&function.block), 0);
+        //
+        // mlirBlockInsertOwnedOperationAfter(function.block.instance, reference, operation)
+        // mlirOperationGetBlock(op)
 
         self.mlir_gen_expression(function_ast.body.unwrap());
         // function.erase();
@@ -513,13 +692,13 @@ impl MLIRGen {
 
     fn mlir_gen_prototype(&mut self, prototype_ast: Prototype) -> FuncOp {
         // FIXME: construct location from AST location
-        let location = Location::new(Context::default());
+        let location = Location::new(&self.context);
         // FIXME: convert VarType to mlirType
         // let arg_types = vec![Type::new(Context::default()); prototype_ast.args.len()];
         // let func_type = self.builder.get_function_type(arg_types, llvm::None);
 
         // FIXME: create function op with prototype name and funcType
-        FuncOp::new_with_location(location)
+        FuncOp::new(location, &prototype_ast.name)
     }
 
     fn declare(&mut self, name: String, value: Value) {
@@ -533,14 +712,11 @@ impl MLIRGen {
         match expr {
             ExprList { expressions } => {
                 for expr in expressions {
-                    self.mlir_gen_expression(*expr.clone());
-                    // println!("ExprList: {:#?}", expr);
-                    println!("ExprList");
+                    let _value = self.mlir_gen_expression(*expr.clone());
                 }
                 Err("ExprList not implemented")
             }
             VarDecl { name, value } => {
-                println!("VarDecl: {:#?} {}", value, name);
                 let value = self.mlir_gen_expression(*value).unwrap();
                 // TODO: reshape op
                 // declare variable in the symbol table
@@ -560,24 +736,24 @@ impl MLIRGen {
                 values,
                 dims,
             } => {
-                println!("Tensor: ");
                 let size = dims.iter().product();
                 let mut data: Vec<f64> = Vec::new();
                 data.reserve(size);
                 self.collect_data(clone_expr, &mut data);
-                let ty = Type::new(Context::default());
+                let ty = Type::new(&self.context);
                 // TODO: contruct ConstanOp with array
-                Ok(Value::from(ConstantOp::new(
-                    Location::new(Context::default()),
-                    data[0],
-                )))
+                let op = ConstantOp::new(Location::new(&self.context), data[0]);
+                self.builder.insert(Operation::from(op.clone()));
+                Ok(Value::from(op))
             }
             Number(num) => {
-                let location = Location::new(Context::default());
-                Ok(Value::from(ConstantOp::new(location, num)))
+                let location = Location::new(&self.context);
+                let op = ConstantOp::new(location, num);
+                self.builder.insert(Operation::from(op.clone()));
+                Ok(Value::from(op))
             }
             Call { fn_name, args } => {
-                let location = Location::new(Context::default());
+                let location = Location::new(&self.context);
                 let mut operands: Vec<Value> = Vec::new();
                 for arg in &args {
                     let arg = self.mlir_gen_expression(arg.clone()).unwrap();
@@ -587,16 +763,20 @@ impl MLIRGen {
                     if args.len() != 1 {
                         panic!("MLIR codegen encountered an error: toy.transpose does not accept multiple args");
                     }
-                    return Ok(Value::from(TransposeOp::new(location, operands[0].clone())));
+                    let op = TransposeOp::new(location, operands[0].clone());
+                    self.builder.insert(Operation::from(op.clone()));
+                    return Ok(Value::from(op));
                 }
 
-                Ok(Value::from(GenericCallOp::new(location, fn_name, operands)))
+                let op = GenericCallOp::new(location, fn_name, operands);
+                self.builder.insert(Operation::from(op.clone()));
+                Ok(Value::from(op))
             }
             Return {
                 location: _,
                 expression,
             } => {
-                let location = Location::new(Context::default());
+                let location = Location::new(&self.context);
                 let value = self.mlir_gen_expression(*expression).unwrap();
                 Ok(Value::from(ReturnOp::new(location, value)))
             }
@@ -604,7 +784,7 @@ impl MLIRGen {
             Binary { op, left, right } => {
                 let lhs = self.mlir_gen_expression(*left).unwrap();
                 let rhs = self.mlir_gen_expression(*right).unwrap();
-                let location = Location::new(Context::default());
+                let location = Location::new(&self.context);
                 match op {
                     '+' => Ok(Value::from(AddOp::new(location, lhs, rhs))),
                     '*' => Ok(Value::from(MulOp::new(location, lhs, rhs))),
@@ -678,12 +858,15 @@ mod tests {
         prec.insert('*', 40);
         prec.insert('/', 40);
 
-        let context = Context::default();
+        let mut context = Context::default();
+        let dialect = ToyDialect::new(&context);
+        context.load_dialect(Box::new(dialect));
+
         let module = parser::Parser::new(content, &mut prec)
             .parse_module()
             .unwrap();
         let module = MLIRGen::new(context).mlir_gen(module);
-        assert!(module.block.operations.is_empty());
+        assert!(!module.block.operations.is_empty());
     }
 
     #[test]
@@ -707,6 +890,8 @@ mod tests {
             .parse_module()
             .unwrap();
         let module = MLIRGen::new(context).mlir_gen(module);
-        assert!(module.block.operations.is_empty());
+        println!("Dump:");
+        module.dump();
+        assert!(!module.block.operations.is_empty());
     }
 }

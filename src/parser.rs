@@ -363,7 +363,6 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 EOF => {
-                    println!("end of file reached!");
                     break;
                 }
                 _ => {
@@ -568,7 +567,6 @@ impl<'a> Parser<'a> {
         match self.curr() {
             Number(nb) => {
                 self.advance();
-                println!("Found number {}", nb);
                 Ok(Expr::Number(nb))
             }
             _ => Err("Expected number literal."),
@@ -706,10 +704,7 @@ impl<'a> Parser<'a> {
         self.advance()?;
 
         let _var_type = match self.curr() {
-            AngleLeft => {
-                println!("AngleLeft");
-                self.parse_var_type()?
-            }
+            AngleLeft => self.parse_var_type()?,
             _ => VarType::new(),
         };
 
@@ -727,9 +722,7 @@ impl<'a> Parser<'a> {
             Comma => {
                 self.advance()?;
             }
-            Semicolon => {
-                println!("Semicolon");
-            }
+            Semicolon => {}
             _ => return Err("Expected comma or 'in' keyword in variable declaration."),
         }
 
@@ -773,19 +766,15 @@ impl<'a> Parser<'a> {
         loop {
             match self.curr() {
                 Token::TensorBegin => {
-                    println!("Found TensorBegin");
                     values.push(self.parse_tensor_literal_expr()?);
                 }
                 Token::Comma => {
-                    println!("Found comma");
                     self.advance();
                 }
                 Token::Number(_) => {
-                    println!("Found TensorNumber");
                     values.push(self.parse_nb_expr()?);
                 }
                 Token::TensorEnd => {
-                    println!("Found TensorEnd");
                     self.advance();
                     break;
                 }
@@ -823,17 +812,13 @@ impl<'a> Parser<'a> {
         loop {
             match self.curr() {
                 Token::BlockRight => {
-                    println!("BlockRight");
                     self.advance();
                     break;
                 }
-                Token::Semicolon => {
-                    println!("Semicolon");
-                }
+                Token::Semicolon => {}
                 Token::Return => {
                     let expr = self.parse_return()?;
                     expressions.push(Box::new(expr));
-                    println!("Return");
                 }
                 Comment => {
                     self.advance();
