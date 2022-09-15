@@ -1,26 +1,31 @@
 pub mod parser;
+pub mod toy;
 
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 
 use std::rc::Rc;
+use toy::mlirGetDialectHandle__toy__;
 
 use mlir_sys::{
-    mlirAttributeParseGet, mlirBlockCreate, mlirBlockInsertOwnedOperation,
+    mlirAttributeGetNull, mlirAttributeParseGet, mlirBlockCreate, mlirBlockInsertOwnedOperation,
     mlirBlockInsertOwnedOperationAfter, mlirContextAppendDialectRegistry, mlirContextCreate,
     mlirContextGetNumLoadedDialects, mlirContextGetNumRegisteredDialects,
     mlirContextGetOrLoadDialect, mlirContextSetAllowUnregisteredDialects,
-    mlirDialectHandleGetNamespace, mlirDialectRegistryCreate, mlirGetDialectHandle__std__,
-    mlirIdentifierGet, mlirLocationGetContext, mlirLocationUnknownGet, mlirModuleCreateEmpty,
-    mlirModuleGetBody, mlirModuleGetOperation, mlirNamedAttributeGet, mlirNoneTypeGet,
-    mlirOperationCreate, mlirOperationDump, mlirOperationGetBlock, mlirOperationGetResult,
-    mlirOperationStateAddAttributes, mlirOperationStateAddOwnedRegions, mlirOperationStateGet,
+    mlirDenseElementsAttrDoubleGet, mlirDenseElementsAttrGet, mlirDenseElementsAttrGetDoubleValue,
+    mlirDialectHandleGetNamespace, mlirDialectHandleInsertDialect, mlirDialectHandleLoadDialect,
+    mlirDialectHandleRegisterDialect, mlirDialectRegistryCreate, mlirF64TypeGet,
+    mlirGetDialectHandle__std__, mlirIdentifierGet, mlirLocationGetContext, mlirLocationUnknownGet,
+    mlirModuleCreateEmpty, mlirModuleGetBody, mlirModuleGetOperation, mlirNamedAttributeGet,
+    mlirNoneTypeGet, mlirOperationCreate, mlirOperationDump, mlirOperationGetBlock,
+    mlirOperationGetResult, mlirOperationStateAddAttributes, mlirOperationStateAddOwnedRegions,
+    mlirOperationStateAddResults, mlirOperationStateGet, mlirRankedTensorTypeGet,
     mlirRegionAppendOwnedBlock, mlirRegionCreate, mlirRegisterAllDialects,
-    mlirStringRefCreateFromCString,
+    mlirRegisterLinalgLinalgLowerToLoops, mlirStringRefCreateFromCString,
 };
 use mlir_sys::{
-    MlirBlock, MlirContext, MlirDialectHandle, MlirLocation, MlirModule, MlirNamedAttribute,
-    MlirOperation, MlirOperationState, MlirRegion, MlirType, MlirValue,
+    MlirAttribute, MlirBlock, MlirContext, MlirDialectHandle, MlirLocation, MlirModule,
+    MlirNamedAttribute, MlirOperation, MlirOperationState, MlirRegion, MlirType, MlirValue,
 };
 
 use crate::parser::Expr::{Binary, Call, ExprList, Number, Return, Tensor, VarDecl, Variable};
@@ -32,6 +37,12 @@ pub trait Dialect {
 pub struct Context {
     instance: MlirContext,
     dialects: Vec<Box<dyn Dialect>>,
+}
+
+impl From<toy::MlirDialectHandle> for mlir_sys::MlirDialectHandle {
+    fn from(dialect: toy::MlirDialectHandle) -> Self {
+        Self { ptr: dialect.ptr }
+    }
 }
 
 impl Context {
@@ -50,7 +61,7 @@ impl Context {
             );
             // FIXME: make dialects to be registered separately
             mlirRegisterAllDialects(instance);
-            mlirContextSetAllowUnregisteredDialects(instance, true);
+            // mlirContextSetAllowUnregisteredDialects(instance, true);
             println!(
                 "Registered dialects num {}",
                 mlirContextGetNumLoadedDialects(instance)
@@ -59,7 +70,9 @@ impl Context {
                 "Load dialects num {}",
                 mlirContextGetNumLoadedDialects(instance)
             );
-            // mlirContextAppendDialectRegistry(instance, registry);
+            let handle = mlir_sys::MlirDialectHandle::from(mlirGetDialectHandle__toy__());
+            mlirDialectHandleRegisterDialect(handle, instance);
+            mlirDialectHandleLoadDialect(handle, instance);
             Self {
                 instance,
                 dialects: Vec::new(),
@@ -85,13 +98,26 @@ pub struct ToyDialect {
     // context: &'a Context,
     // name
     ops: Vec<Box<dyn Op>>,
+    name: CString,
 }
 
 impl ToyDialect {
-    pub fn new(_context: &Context) -> Self {
+    pub fn new(context: &Context) -> Self {
         // let ops = Vec::new();
+        let name = CString::new("toy").unwrap();
+        unsafe {
+            let dialect = mlirContextGetOrLoadDialect(
+                context.instance,
+                mlirStringRefCreateFromCString(name.as_ptr()),
+            );
+            // mlirDialectHandleInsertDialect(arg1, arg2)
+            if (dialect.ptr.is_null()) {
+                panic!("Cannot load Toy dialect");
+            }
+            mlirRegisterLinalgLinalgLowerToLoops()
+        }
         let ops: Vec<Box<dyn Op>> = vec![Box::new(PrintOp::default())];
-        Self { ops }
+        Self { ops, name }
     }
 }
 
@@ -187,29 +213,67 @@ struct ConstantOp {
     instance: MlirOperation,
     value: f64,
     state: OperationState,
+    location: Location,
 }
 
 impl ConstantOp {
-    pub fn new(location: Location, value: f64) -> Self {
+    pub fn new(location: Location) -> Self {
         unsafe {
             // FIXME: duplication toy.constant
             let name = String::from("toy.constant");
-            let mut state = OperationState::new("toy.constant", location);
+            let mut state = OperationState::new("toy.constant", location.clone());
             let p_state: *mut MlirOperationState = &mut state.instance;
             let instance = mlirOperationCreate(p_state);
 
             Self {
                 name,
                 instance,
-                value,
+                value: 0.0,
                 state,
+                location,
             }
         }
+    }
+
+    pub fn with_value(&mut self, value: f64) -> &mut Self {
+        self.value = value;
+        self
+    }
+
+    pub fn with_result(&mut self, result_type: Type) -> &mut Self {
+        let results: Vec<MlirType> = vec![result_type.instance; 1];
+        let p_state: *mut MlirOperationState = &mut self.state.instance;
+        unsafe { mlirOperationStateAddResults(p_state, 0, results.as_ptr()) };
+        self
+    }
+
+    pub(crate) fn with_attribute(&mut self, data_attr: Attribute) -> &mut Self {
+        unsafe {
+            let mlir_context = mlirLocationGetContext(self.location.instance);
+            let p_state: *mut MlirOperationState = &mut self.state.instance;
+            let string_value_id = CString::new("value").unwrap();
+            let value_id = mlirIdentifierGet(
+                mlir_context,
+                mlirStringRefCreateFromCString(string_value_id.as_ptr()),
+            );
+            let named_data_attr = mlirNamedAttributeGet(value_id, data_attr.instance);
+            let p_named_data_attr: *const MlirNamedAttribute = &named_data_attr;
+            mlirOperationStateAddAttributes(p_state, 1, p_named_data_attr)
+        }
+        self
     }
 }
 
 impl From<ConstantOp> for Value {
     fn from(op: ConstantOp) -> Self {
+        // use op to construct Value
+        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
+        Value::new(instance)
+    }
+}
+
+impl From<&mut ConstantOp> for Value {
+    fn from(op: &mut ConstantOp) -> Self {
         // use op to construct Value
         let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
         Value::new(instance)
@@ -439,6 +503,7 @@ impl Op for PrintOp {
     }
 }
 
+#[derive(Clone)]
 struct Location {
     instance: MlirLocation,
 }
@@ -598,6 +663,23 @@ impl Type {
     }
 }
 
+impl From<MlirType> for Type {
+    fn from(instance: MlirType) -> Self {
+        Self { instance }
+    }
+}
+
+#[derive(Clone)]
+struct Attribute {
+    instance: MlirAttribute,
+}
+
+impl From<MlirAttribute> for Attribute {
+    fn from(instance: MlirAttribute) -> Self {
+        Self { instance }
+    }
+}
+
 #[derive(Clone)]
 struct Value {
     instance: MlirValue,
@@ -611,6 +693,7 @@ impl Value {
 }
 
 struct OpBuilder {
+    context: Rc<Context>,
     block: Option<Rc<Block>>,
     pos: isize,
 }
@@ -628,24 +711,55 @@ impl<'ctx> OpBuilder {
             self.pos += 1;
         }
     }
+
+    fn get_f64_type(&self) -> Type {
+        unsafe { Type::from(mlirF64TypeGet(self.context.instance)) }
+    }
+
+    // TODO: redundant copies of dims
+    fn get_ranked_tensor_type(&self, dims: Vec<usize>, elem_ty: Type) -> Type {
+        let rank: isize = dims.len() as isize;
+        let shape: Vec<i64> = dims.into_iter().map(|x| x as i64).collect();
+        let p_shape = shape.as_ptr();
+        // NB: not sure what else can be used as enconding, so passing mlirAttributeGetNull for now
+        unsafe {
+            Type::from(mlirRankedTensorTypeGet(
+                rank,
+                p_shape,
+                elem_ty.instance,
+                mlirAttributeGetNull(),
+            ))
+        }
+    }
+
+    fn get_dense_elements_attr(&self, data_ty: Type, data: Vec<f64>) -> Attribute {
+        unsafe {
+            Attribute::from(mlirDenseElementsAttrDoubleGet(
+                data_ty.instance,
+                data.len() as isize,
+                data.as_ptr(),
+            ))
+        }
+    }
 }
 
 struct MLIRGen {
     module: ModuleOp,
     symbol_table: HashMap<String, Value>,
-    context: Context,
+    context: Rc<Context>,
     builder: OpBuilder,
 }
 
 impl<'ctx> MLIRGen {
-    pub fn new(context: Context) -> Self {
+    pub fn new(context: Rc<Context>) -> Self {
         Self {
-            module: ModuleOp::new(Location::new(&context)),
+            module: ModuleOp::new(Location::new(&*context)),
             symbol_table: HashMap::new(),
-            context,
+            context: Rc::clone(&context),
             builder: OpBuilder {
                 block: Option::None,
                 pos: 0,
+                context: Rc::clone(&context),
             },
         }
     }
@@ -742,13 +856,21 @@ impl<'ctx> MLIRGen {
                 self.collect_data(clone_expr, &mut data);
                 let ty = Type::new(&self.context);
                 // TODO: contruct ConstanOp with array
-                let op = ConstantOp::new(Location::new(&self.context), data[0]);
+                let elem_ty = self.builder.get_f64_type();
+                let data_ty = self.builder.get_ranked_tensor_type(dims, elem_ty);
+                let data_attr: Attribute = self.builder.get_dense_elements_attr(data_ty, data);
+                // TODO: a separate builder for constructing a type?
+                let mut op = ConstantOp::new(Location::new(&self.context));
+                op.with_result(ty).with_attribute(data_attr);
                 self.builder.insert(Operation::from(op.clone()));
+                println!("Tensor dump");
+                unsafe { mlirOperationDump(op.instance) };
                 Ok(Value::from(op))
             }
             Number(num) => {
                 let location = Location::new(&self.context);
-                let op = ConstantOp::new(location, num);
+                let mut op = ConstantOp::new(location);
+                op.with_value(num);
                 self.builder.insert(Operation::from(op.clone()));
                 Ok(Value::from(op))
             }
@@ -858,14 +980,15 @@ mod tests {
         prec.insert('*', 40);
         prec.insert('/', 40);
 
-        let mut context = Context::default();
-        let dialect = ToyDialect::new(&context);
-        context.load_dialect(Box::new(dialect));
+        let context = Rc::new(Context::default());
+        // Need to make it mutable
+        // let dialect = ToyDialect::new(&context);
+        // context.load_dialect(Box::new(dialect));
 
         let module = parser::Parser::new(content, &mut prec)
             .parse_module()
             .unwrap();
-        let module = MLIRGen::new(context).mlir_gen(module);
+        let module = MLIRGen::new(Rc::clone(&context)).mlir_gen(module);
         assert!(!module.block.operations.is_empty());
     }
 
@@ -885,11 +1008,14 @@ mod tests {
         prec.insert('*', 40);
         prec.insert('/', 40);
 
-        let context = Context::default();
+        let context = Rc::new(Context::default());
+        // Need to make it mutable
+        let dialect = ToyDialect::new(&context);
+        // context.load_dialect(Box::new(dialect));
         let module = parser::Parser::new(content, &mut prec)
             .parse_module()
             .unwrap();
-        let module = MLIRGen::new(context).mlir_gen(module);
+        let module = MLIRGen::new(Rc::clone(&context)).mlir_gen(module);
         println!("Dump:");
         module.dump();
         assert!(!module.block.operations.is_empty());
