@@ -8,20 +8,27 @@ use std::rc::Rc;
 use toy::mlirGetDialectHandle__toy__;
 
 use mlir_sys::{
-    mlirAttributeGetNull, mlirAttributeParseGet, mlirBlockCreate, mlirBlockInsertOwnedOperation,
-    mlirBlockInsertOwnedOperationAfter, mlirContextAppendDialectRegistry, mlirContextCreate,
-    mlirContextGetNumLoadedDialects, mlirContextGetNumRegisteredDialects,
-    mlirContextGetOrLoadDialect, mlirContextSetAllowUnregisteredDialects,
-    mlirDenseElementsAttrDoubleGet, mlirDenseElementsAttrGet, mlirDenseElementsAttrGetDoubleValue,
-    mlirDialectHandleGetNamespace, mlirDialectHandleInsertDialect, mlirDialectHandleLoadDialect,
-    mlirDialectHandleRegisterDialect, mlirDialectRegistryCreate, mlirF64TypeGet,
-    mlirGetDialectHandle__std__, mlirIdentifierGet, mlirLocationGetContext, mlirLocationUnknownGet,
-    mlirModuleCreateEmpty, mlirModuleGetBody, mlirModuleGetOperation, mlirNamedAttributeGet,
-    mlirNoneTypeGet, mlirOperationCreate, mlirOperationDump, mlirOperationGetBlock,
-    mlirOperationGetResult, mlirOperationStateAddAttributes, mlirOperationStateAddOwnedRegions,
-    mlirOperationStateAddResults, mlirOperationStateGet, mlirRankedTensorTypeGet,
-    mlirRegionAppendOwnedBlock, mlirRegionCreate, mlirRegisterAllDialects,
-    mlirRegisterLinalgLinalgLowerToLoops, mlirStringRefCreateFromCString,
+    mlirAttributeGetNull, mlirAttributeParseGet, mlirBlockAddArgument, mlirBlockCreate,
+    mlirBlockInsertOwnedOperation, mlirBlockInsertOwnedOperationAfter,
+    mlirContextAppendDialectRegistry, mlirContextCreate, mlirContextGetNumLoadedDialects,
+    mlirContextGetNumRegisteredDialects, mlirContextGetOrLoadDialect,
+    mlirContextSetAllowUnregisteredDialects, mlirDenseElementsAttrDoubleGet,
+    mlirDenseElementsAttrGet, mlirDenseElementsAttrGetDoubleValue, mlirDialectHandleGetNamespace,
+    mlirDialectHandleInsertDialect, mlirDialectHandleLoadDialect, mlirDialectHandleRegisterDialect,
+    mlirDialectRegistryCreate, mlirF64TypeGet, mlirFunctionTypeGet, mlirFunctionTypeGetInput,
+    mlirFunctionTypeGetNumInputs, mlirFunctionTypeGetNumResults, mlirFunctionTypeGetResult,
+    mlirGetDialectHandle__std__, mlirIdentifierGet, mlirIdentifierStr, mlirLocationGetContext,
+    mlirLocationUnknownGet, mlirModuleCreateEmpty, mlirModuleGetBody, mlirModuleGetOperation,
+    mlirNamedAttributeGet, mlirNoneTypeGet, mlirOperationCreate, mlirOperationDump,
+    mlirOperationGetAttributeByName, mlirOperationGetBlock, mlirOperationGetName,
+    mlirOperationGetResult, mlirOperationStateAddAttributes, mlirOperationStateAddOperands,
+    mlirOperationStateAddOwnedRegions, mlirOperationStateAddResults, mlirOperationStateGet,
+    mlirRankedTensorTypeGet, mlirRankedTensorTypeGetEncoding, mlirRegionAppendOwnedBlock,
+    mlirRegionCreate, mlirRegisterAllDialects, mlirRegisterLinalgLinalgLowerToLoops,
+    mlirShapedTypeGetDimSize, mlirShapedTypeGetRank, mlirStringRefCreateFromCString, mlirTypeDump,
+    mlirTypeIsAFunction, mlirTypeIsANone, mlirTypeIsARankedTensor, mlirTypeIsATensor,
+    mlirTypeIsAUnrankedTensor, mlirUnrankedTensorTypeGet, mlirValueDump, mlirValueGetType,
+    mlirValueIsABlockArgument,
 };
 use mlir_sys::{
     MlirAttribute, MlirBlock, MlirContext, MlirDialectHandle, MlirLocation, MlirModule,
@@ -53,7 +60,7 @@ impl Context {
             // let registry = mlirDialectRegistryCreate();
             println!(
                 "Registered dialects num {}",
-                mlirContextGetNumLoadedDialects(instance)
+                mlirContextGetNumRegisteredDialects(instance)
             );
             println!(
                 "Load dialects num {}",
@@ -64,7 +71,7 @@ impl Context {
             // mlirContextSetAllowUnregisteredDialects(instance, true);
             println!(
                 "Registered dialects num {}",
-                mlirContextGetNumLoadedDialects(instance)
+                mlirContextGetNumRegisteredDialects(instance)
             );
             println!(
                 "Load dialects num {}",
@@ -73,6 +80,14 @@ impl Context {
             let handle = mlir_sys::MlirDialectHandle::from(mlirGetDialectHandle__toy__());
             mlirDialectHandleRegisterDialect(handle, instance);
             mlirDialectHandleLoadDialect(handle, instance);
+            println!(
+                "Registered dialects num {}",
+                mlirContextGetNumRegisteredDialects(instance)
+            );
+            println!(
+                "Load dialects num {}",
+                mlirContextGetNumLoadedDialects(instance)
+            );
             Self {
                 instance,
                 dialects: Vec::new(),
@@ -243,7 +258,7 @@ impl ConstantOp {
     pub fn with_result(&mut self, result_type: Type) -> &mut Self {
         let results: Vec<MlirType> = vec![result_type.instance; 1];
         let p_state: *mut MlirOperationState = &mut self.state.instance;
-        unsafe { mlirOperationStateAddResults(p_state, 0, results.as_ptr()) };
+        unsafe { mlirOperationStateAddResults(p_state, 1, results.as_ptr()) };
         self
     }
 
@@ -261,6 +276,17 @@ impl ConstantOp {
             mlirOperationStateAddAttributes(p_state, 1, p_named_data_attr)
         }
         self
+    }
+
+    pub(crate) fn build(&mut self) -> &mut Self {
+        unsafe {
+            // FIXME: here we create op one more time despite it was created in new method
+            let p_state: *mut MlirOperationState = &mut self.state.instance;
+            let instance = mlirOperationCreate(p_state);
+            self.instance = instance;
+
+            self
+        }
     }
 }
 
@@ -299,14 +325,22 @@ struct TransposeOp {
 
 // TODO: implementation looks the same to ConstantOp, besides the name
 impl TransposeOp {
-    pub fn new(location: Location, input: Value) -> Self {
+    pub fn new(location: Location, input: Value, result_type: Type) -> Self {
         unsafe {
             // FIXME: duplication toy.constant
             let name = String::from("toy.transpose");
             let mut state = OperationState::new("toy.transpose", location);
             let p_state: *mut MlirOperationState = &mut state.instance;
-            let instance = mlirOperationCreate(p_state);
 
+            // TODO: extract to builder
+            let p_operands: *const MlirValue = &input.instance;
+            mlirOperationStateAddOperands(p_state, 1, p_operands);
+
+            // TODO: extract to builder
+            let results: Vec<MlirType> = vec![result_type.instance; 1];
+            unsafe { mlirOperationStateAddResults(p_state, 1, results.as_ptr()) };
+
+            let instance = mlirOperationCreate(p_state);
             Self {
                 name,
                 instance,
@@ -381,10 +415,12 @@ impl From<GenericCallOp> for Operation {
     }
 }
 
+#[derive(Clone)]
 struct ReturnOp {
     name: String,
     instance: MlirOperation,
     input: Value,
+    state: OperationState,
 }
 
 impl ReturnOp {
@@ -400,6 +436,7 @@ impl ReturnOp {
                 name,
                 instance,
                 input,
+                state,
             }
         }
     }
@@ -410,6 +447,15 @@ impl From<ReturnOp> for Value {
         // use op to construct Value
         let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
         Value::new(instance)
+    }
+}
+
+impl From<ReturnOp> for Operation {
+    fn from(op: ReturnOp) -> Self {
+        Self {
+            state: op.state,
+            instance: op.instance,
+        }
     }
 }
 
@@ -559,6 +605,7 @@ impl OneRegion for ModuleOp {
     }
 }
 
+#[derive(Clone)]
 struct FuncOp {
     instance: MlirOperation,
     state: OperationState,
@@ -567,7 +614,7 @@ struct FuncOp {
 }
 
 impl FuncOp {
-    pub fn new(mut location: Location, name: &str) -> Self {
+    pub fn new(mut location: Location, name: &str, func_type: Type) -> Self {
         unsafe {
             let mlir_context = mlirLocationGetContext(location.instance);
             let mlir_region = mlirRegionCreate();
@@ -575,13 +622,14 @@ impl FuncOp {
             let num_args = 0;
             let mut args = mlirNoneTypeGet(mlir_context);
             let p_args: *mut MlirType = &mut args;
-
             let p_locs = &mut location.instance;
-
             let mlir_block = mlirBlockCreate(num_args, p_args, p_locs);
             mlirRegionAppendOwnedBlock(mlir_region, mlir_block);
 
-            let string_func_attr = CString::new("() -> ()").unwrap();
+            let func_type_string: String = Self::serialize_func_type(func_type).unwrap();
+            println!("Serialized func type {}", func_type_string);
+
+            let string_func_attr = CString::new(func_type_string).unwrap();
             let func_type_attr = mlirAttributeParseGet(
                 mlir_context,
                 mlirStringRefCreateFromCString(string_func_attr.as_ptr()),
@@ -634,6 +682,58 @@ impl FuncOp {
             }
         }
     }
+
+    fn serialize_func_type(func_type: Type) -> Result<String, &'static str> {
+        unsafe {
+            if !mlirTypeIsAFunction(func_type.instance) {
+                return Err("Provided type is not a function type");
+            }
+
+            let mut result = String::new();
+            result.push('(');
+            let num_inputs = mlirFunctionTypeGetNumInputs(func_type.instance);
+            for pos in 0..num_inputs {
+                let arg = mlirFunctionTypeGetInput(func_type.instance, pos);
+                if mlirTypeIsATensor(arg) {
+                    result.push_str("tensor<");
+                    if mlirTypeIsARankedTensor(arg) {
+                        let rank = mlirShapedTypeGetRank(arg);
+                        for r in 0..rank {
+                            let dim = mlirShapedTypeGetDimSize(arg, r as isize);
+                            result.push_str(&dim.to_string());
+                            result.push(',');
+                        }
+                    } else if mlirTypeIsAUnrankedTensor(arg) {
+                        // FIXME: parse elem type
+                        result.push_str("?xf64");
+                    }
+                    result.push('>');
+                }
+                if pos < num_inputs - 1 {
+                    result.push(',')
+                }
+            }
+            result.push(')');
+            result.push_str(" -> ");
+            result.push('(');
+            let num_results = mlirFunctionTypeGetNumResults(func_type.instance);
+            for pos in 0..num_results {
+                let arg = mlirFunctionTypeGetResult(func_type.instance, pos);
+                if mlirTypeIsATensor(arg) {
+                    if mlirTypeIsARankedTensor(arg) {
+                        let rank = mlirShapedTypeGetRank(arg);
+                        for r in 0..rank {
+                            let dim = mlirShapedTypeGetDimSize(arg, r as isize);
+                            result.push_str(&dim.to_string());
+                            result.push(',');
+                        }
+                    }
+                }
+            }
+            result.push(')');
+            Ok(result)
+        }
+    }
 }
 
 impl From<FuncOp> for Operation {
@@ -642,6 +742,14 @@ impl From<FuncOp> for Operation {
             state: op.state,
             instance: op.instance,
         }
+    }
+}
+
+impl From<FuncOp> for Value {
+    fn from(op: FuncOp) -> Self {
+        // use op to construct Value
+        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
+        Value::new(instance)
     }
 }
 
@@ -741,6 +849,29 @@ impl<'ctx> OpBuilder {
             ))
         }
     }
+
+    fn get_unranked_tensor_type(&self, elem_type: Type) -> Type {
+        unsafe { Type::from(mlirUnrankedTensorTypeGet(elem_type.instance)) }
+    }
+
+    fn get_function_type(&self, arg_types: Vec<Type>, result_types: Vec<Type>) -> Type {
+        let num_inputs = arg_types.len() as isize;
+        let num_result = result_types.len() as isize;
+        let args: Vec<MlirType> = arg_types.into_iter().map(|x| x.instance).collect();
+        let p_args: *const MlirType = args.as_ptr();
+        let results: Vec<MlirType> = result_types.into_iter().map(|x| x.instance).collect();
+        let p_results: *const MlirType = results.as_ptr();
+
+        unsafe {
+            Type::from(mlirFunctionTypeGet(
+                self.context.instance,
+                num_inputs,
+                p_args,
+                num_result,
+                p_results,
+            ))
+        }
+    }
 }
 
 struct MLIRGen {
@@ -774,19 +905,27 @@ impl<'ctx> MLIRGen {
             // add func into self.module
         }
 
-        // TODO: verify self.module
-
         self.module.clone()
     }
 
     fn mlir_gen_function(&mut self, function_ast: Function) -> FuncOp {
         // varScopeTable
-        let var_scope: HashMap<&str, Value> = HashMap::new();
+        // let var_scope: HashMap<&str, Value> = HashMap::new();
         let function: FuncOp = self.mlir_gen_prototype(function_ast.prototype.clone());
 
         let entry_block = function.block.clone();
         // TODO: getter for prototype
         let proto_args = function_ast.prototype.args.clone();
+        // FIXME: just for the sake of adding something into the table
+        // need to review how it is done in original Toy tutorial
+        for arg in proto_args {
+            unsafe {
+                let arg_type = mlirNoneTypeGet(self.context.instance);
+                let location = Location::new(&self.context);
+                let value = mlirBlockAddArgument(entry_block.instance, arg_type, location.instance);
+                self.declare(arg, Value::new(value));
+            }
+        }
         // TODO: declare all the function arguments in the symbol table
         // TODO: implement builder method
         // self.builder.set_insertion_point_to_start(entry_block);
@@ -807,12 +946,11 @@ impl<'ctx> MLIRGen {
     fn mlir_gen_prototype(&mut self, prototype_ast: Prototype) -> FuncOp {
         // FIXME: construct location from AST location
         let location = Location::new(&self.context);
-        // FIXME: convert VarType to mlirType
-        // let arg_types = vec![Type::new(Context::default()); prototype_ast.args.len()];
-        // let func_type = self.builder.get_function_type(arg_types, llvm::None);
+        let arg_types = vec![self.get_type(Vec::new()); prototype_ast.args.len()];
+        let func_type = self.builder.get_function_type(arg_types, Vec::new());
 
-        // FIXME: create function op with prototype name and funcType
-        FuncOp::new(location, &prototype_ast.name)
+        // TODO: make it builder
+        FuncOp::new(location, &prototype_ast.name, func_type)
     }
 
     fn declare(&mut self, name: String, value: Value) {
@@ -858,13 +996,17 @@ impl<'ctx> MLIRGen {
                 // TODO: contruct ConstanOp with array
                 let elem_ty = self.builder.get_f64_type();
                 let data_ty = self.builder.get_ranked_tensor_type(dims, elem_ty);
+                if data_ty.instance.ptr.is_null() {
+                    panic!("Type is null");
+                }
                 let data_attr: Attribute = self.builder.get_dense_elements_attr(data_ty, data);
+                if data_attr.instance.ptr.is_null() {
+                    panic!("Attr is null");
+                }
                 // TODO: a separate builder for constructing a type?
                 let mut op = ConstantOp::new(Location::new(&self.context));
-                op.with_result(ty).with_attribute(data_attr);
+                op.with_result(ty).with_attribute(data_attr).build();
                 self.builder.insert(Operation::from(op.clone()));
-                println!("Tensor dump");
-                unsafe { mlirOperationDump(op.instance) };
                 Ok(Value::from(op))
             }
             Number(num) => {
@@ -885,14 +1027,29 @@ impl<'ctx> MLIRGen {
                     if args.len() != 1 {
                         panic!("MLIR codegen encountered an error: toy.transpose does not accept multiple args");
                     }
-                    let op = TransposeOp::new(location, operands[0].clone());
+                    let op = TransposeOp::new(
+                        location,
+                        operands[0].clone(),
+                        self.builder
+                            .get_unranked_tensor_type(self.builder.get_f64_type()),
+                    );
                     self.builder.insert(Operation::from(op.clone()));
-                    return Ok(Value::from(op));
+                    let value = Value::from(op);
+                    if !value.instance.ptr.is_null() {
+                        println!("Call value");
+                        // unsafe { mlirValueDump(value.instance) };
+                    }
+                    return Ok(value);
+                    // return Ok(Value::from(op));
                 }
 
                 let op = GenericCallOp::new(location, fn_name, operands);
                 self.builder.insert(Operation::from(op.clone()));
-                Ok(Value::from(op))
+                let value = Value::from(op);
+                println!("Call value");
+                unsafe { mlirValueDump(value.instance) };
+                Ok(value)
+                // Ok(Value::from(op))
             }
             Return {
                 location: _,
@@ -900,7 +1057,9 @@ impl<'ctx> MLIRGen {
             } => {
                 let location = Location::new(&self.context);
                 let value = self.mlir_gen_expression(*expression).unwrap();
-                Ok(Value::from(ReturnOp::new(location, value)))
+                let op = ReturnOp::new(location, value);
+                self.builder.insert(Operation::from(op.clone()));
+                Ok(Value::from(op))
             }
 
             Binary { op, left, right } => {
@@ -937,6 +1096,17 @@ impl<'ctx> MLIRGen {
                 panic!("Unexpected expression");
             }
         }
+    }
+
+    fn get_type(&self, shape: Vec<usize>) -> Type {
+        if shape.is_empty() {
+            return self
+                .builder
+                .get_unranked_tensor_type(self.builder.get_f64_type());
+        }
+
+        self.builder
+            .get_ranked_tensor_type(shape, self.builder.get_f64_type())
     }
 }
 

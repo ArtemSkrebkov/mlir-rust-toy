@@ -1,3 +1,7 @@
+def multiply_transpose(c, d) {
+  return c;
+  # return transpose(c) * transpose(d);
+}
 # asd
 def main() {
   var a = [1, 2, 3];
