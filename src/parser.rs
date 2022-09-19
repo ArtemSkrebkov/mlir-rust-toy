@@ -784,6 +784,19 @@ impl<'a> Parser<'a> {
         }
         dims.push(values.len());
 
+        // FIXME: can we just do if instead match?
+        match &values[0] {
+            Expr::Tensor {
+                location: _,
+                values: _,
+                dims: d,
+            } => {
+                dims.append(&mut d.clone());
+            }
+            Expr::Number(_num) => {}
+            _ => return Err("Cannot parse tensor"),
+        };
+
         Ok(Expr::Tensor {
             location,
             values,

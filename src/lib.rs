@@ -15,17 +15,18 @@ use mlir_sys::{
     mlirContextSetAllowUnregisteredDialects, mlirDenseElementsAttrDoubleGet,
     mlirDenseElementsAttrGet, mlirDenseElementsAttrGetDoubleValue, mlirDialectHandleGetNamespace,
     mlirDialectHandleInsertDialect, mlirDialectHandleLoadDialect, mlirDialectHandleRegisterDialect,
-    mlirDialectRegistryCreate, mlirF64TypeGet, mlirFunctionTypeGet, mlirFunctionTypeGetInput,
-    mlirFunctionTypeGetNumInputs, mlirFunctionTypeGetNumResults, mlirFunctionTypeGetResult,
-    mlirGetDialectHandle__std__, mlirIdentifierGet, mlirIdentifierStr, mlirLocationGetContext,
-    mlirLocationUnknownGet, mlirModuleCreateEmpty, mlirModuleGetBody, mlirModuleGetOperation,
-    mlirNamedAttributeGet, mlirNoneTypeGet, mlirOperationCreate, mlirOperationDump,
-    mlirOperationGetAttributeByName, mlirOperationGetBlock, mlirOperationGetName,
-    mlirOperationGetResult, mlirOperationStateAddAttributes, mlirOperationStateAddOperands,
-    mlirOperationStateAddOwnedRegions, mlirOperationStateAddResults, mlirOperationStateGet,
-    mlirRankedTensorTypeGet, mlirRankedTensorTypeGetEncoding, mlirRegionAppendOwnedBlock,
-    mlirRegionCreate, mlirRegisterAllDialects, mlirRegisterLinalgLinalgLowerToLoops,
-    mlirShapedTypeGetDimSize, mlirShapedTypeGetRank, mlirStringRefCreateFromCString, mlirTypeDump,
+    mlirDialectRegistryCreate, mlirF64TypeGet, mlirFlatSymbolRefAttrGet, mlirFunctionTypeGet,
+    mlirFunctionTypeGetInput, mlirFunctionTypeGetNumInputs, mlirFunctionTypeGetNumResults,
+    mlirFunctionTypeGetResult, mlirGetDialectHandle__std__, mlirIdentifierGet, mlirIdentifierStr,
+    mlirLocationGetContext, mlirLocationUnknownGet, mlirModuleCreateEmpty, mlirModuleGetBody,
+    mlirModuleGetOperation, mlirNamedAttributeGet, mlirNoneTypeGet, mlirOperationCreate,
+    mlirOperationDump, mlirOperationGetAttributeByName, mlirOperationGetBlock,
+    mlirOperationGetName, mlirOperationGetResult, mlirOperationStateAddAttributes,
+    mlirOperationStateAddOperands, mlirOperationStateAddOwnedRegions, mlirOperationStateAddResults,
+    mlirOperationStateGet, mlirRankedTensorTypeGet, mlirRankedTensorTypeGetEncoding,
+    mlirRegionAppendOwnedBlock, mlirRegionCreate, mlirRegisterAllDialects,
+    mlirRegisterLinalgLinalgLowerToLoops, mlirShapedTypeGetDimSize, mlirShapedTypeGetRank,
+    mlirStringAttrGet, mlirStringRefCreateFromCString, mlirSymbolRefAttrGet, mlirTypeDump,
     mlirTypeIsAFunction, mlirTypeIsANone, mlirTypeIsARankedTensor, mlirTypeIsATensor,
     mlirTypeIsAUnrankedTensor, mlirUnrankedTensorTypeGet, mlirValueDump, mlirValueGetType,
     mlirValueIsABlockArgument,
@@ -372,26 +373,56 @@ impl From<TransposeOp> for Operation {
 struct GenericCallOp {
     name: String,
     instance: MlirOperation,
-    callee: String,
-    operands: Vec<Value>,
+    // callee: String,
+    // operands: Vec<Value>,
     state: OperationState,
 }
 
 // TODO: implementation looks the same to ConstantOp, besides the name
 impl GenericCallOp {
-    pub fn new(location: Location, callee: String, operands: Vec<Value>) -> Self {
+    pub fn new(
+        location: Location,
+        callee: String,
+        operands: Vec<Value>,
+        result_type: Type,
+    ) -> Self {
         unsafe {
             // FIXME: duplication toy.constant
+            let mlir_context = mlirLocationGetContext(location.instance);
             let name = String::from("toy.generic_call");
             let mut state = OperationState::new("toy.generic_call", location);
             let p_state: *mut MlirOperationState = &mut state.instance;
+
+            let operands: Vec<MlirValue> = operands.into_iter().map(|v| v.instance).collect();
+            let p_operands: *const MlirValue = operands.as_ptr();
+            mlirOperationStateAddOperands(p_state, operands.len() as isize, p_operands);
+
+            let p_results: *const MlirType = &result_type.instance;
+            mlirOperationStateAddResults(p_state, 1, p_results);
+
+            // let mlir_context = mlirLocationGetContext(location.instance);
+
+            let string_callee_id = CString::new("callee").unwrap();
+            let callee_id = mlirIdentifierGet(
+                mlir_context,
+                mlirStringRefCreateFromCString(string_callee_id.as_ptr()),
+            );
+
+            let s = CString::new(callee).unwrap();
+            let data_attr =
+                mlirFlatSymbolRefAttrGet(mlir_context, mlirStringRefCreateFromCString(s.as_ptr()));
+
+            let named_data_attr = mlirNamedAttributeGet(callee_id, data_attr);
+            let p_named_data_attr: *const MlirNamedAttribute = &named_data_attr;
+
+            mlirOperationStateAddAttributes(p_state, 1, p_named_data_attr);
             let instance = mlirOperationCreate(p_state);
 
             Self {
                 name,
                 instance,
-                callee,
-                operands,
+                // callee,
+                // operands,
                 state,
             }
         }
@@ -430,6 +461,11 @@ impl ReturnOp {
             let name = String::from("toy.return");
             let mut state = OperationState::new("toy.return", location);
             let p_state: *mut MlirOperationState = &mut state.instance;
+
+            // TODO: let extract to builder
+            let p_operands: *const MlirValue = &input.instance;
+            mlirOperationStateAddOperands(p_state, 1, p_operands);
+
             let instance = mlirOperationCreate(p_state);
 
             Self {
@@ -459,11 +495,13 @@ impl From<ReturnOp> for Operation {
     }
 }
 
+#[derive(Clone)]
 struct AddOp {
     name: String,
     instance: MlirOperation,
     lhs: Value,
     rhs: Value,
+    state: OperationState,
 }
 
 impl AddOp {
@@ -480,6 +518,7 @@ impl AddOp {
                 instance,
                 lhs,
                 rhs,
+                state,
             }
         }
     }
@@ -493,20 +532,39 @@ impl From<AddOp> for Value {
     }
 }
 
+impl From<AddOp> for Operation {
+    fn from(op: AddOp) -> Self {
+        Self {
+            state: op.state,
+            instance: op.instance,
+        }
+    }
+}
+
+#[derive(Clone)]
 struct MulOp {
     name: String,
     instance: MlirOperation,
     lhs: Value,
     rhs: Value,
+    state: OperationState,
 }
 
 impl MulOp {
-    pub fn new(location: Location, lhs: Value, rhs: Value) -> Self {
+    pub fn new(location: Location, lhs: Value, rhs: Value, result_type: Type) -> Self {
         unsafe {
             // FIXME: duplication toy.constant
             let name = String::from("toy.mul");
             let mut state = OperationState::new("toy.mul", location);
             let p_state: *mut MlirOperationState = &mut state.instance;
+
+            let operands = vec![lhs.instance, rhs.instance];
+            let p_operands = operands.as_ptr();
+            mlirOperationStateAddOperands(p_state, operands.len() as isize, p_operands);
+
+            let p_results: *const MlirType = &result_type.instance;
+            mlirOperationStateAddResults(p_state, 1, p_results);
+
             let instance = mlirOperationCreate(p_state);
 
             Self {
@@ -514,6 +572,7 @@ impl MulOp {
                 instance,
                 lhs,
                 rhs,
+                state,
             }
         }
     }
@@ -526,6 +585,16 @@ impl From<MulOp> for Value {
         Value::new(instance)
     }
 }
+
+impl From<MulOp> for Operation {
+    fn from(op: MulOp) -> Self {
+        Self {
+            state: op.state,
+            instance: op.instance,
+        }
+    }
+}
+
 struct PrintOp {
     name: String,
 }
@@ -826,6 +895,7 @@ impl<'ctx> OpBuilder {
 
     // TODO: redundant copies of dims
     fn get_ranked_tensor_type(&self, dims: Vec<usize>, elem_ty: Type) -> Type {
+        println!("Dims size = {}", dims.len());
         let rank: isize = dims.len() as isize;
         let shape: Vec<i64> = dims.into_iter().map(|x| x as i64).collect();
         let p_shape = shape.as_ptr();
@@ -988,7 +1058,13 @@ impl<'ctx> MLIRGen {
                 values,
                 dims,
             } => {
+                println!("Dims result");
+                for i in &dims {
+                    println!("{}", i);
+                }
                 let size = dims.iter().product();
+                println!("Dim before = {}", size);
+                println!("Dim before = {}", dims.len());
                 let mut data: Vec<f64> = Vec::new();
                 data.reserve(size);
                 self.collect_data(clone_expr, &mut data);
@@ -1035,15 +1111,15 @@ impl<'ctx> MLIRGen {
                     );
                     self.builder.insert(Operation::from(op.clone()));
                     let value = Value::from(op);
-                    if !value.instance.ptr.is_null() {
-                        println!("Call value");
-                        // unsafe { mlirValueDump(value.instance) };
-                    }
+
                     return Ok(value);
                     // return Ok(Value::from(op));
                 }
 
-                let op = GenericCallOp::new(location, fn_name, operands);
+                let result_type = self
+                    .builder
+                    .get_unranked_tensor_type(self.builder.get_f64_type());
+                let op = GenericCallOp::new(location, fn_name, operands, result_type);
                 self.builder.insert(Operation::from(op.clone()));
                 let value = Value::from(op);
                 println!("Call value");
@@ -1065,10 +1141,21 @@ impl<'ctx> MLIRGen {
             Binary { op, left, right } => {
                 let lhs = self.mlir_gen_expression(*left).unwrap();
                 let rhs = self.mlir_gen_expression(*right).unwrap();
+                let result_type = self
+                    .builder
+                    .get_unranked_tensor_type(self.builder.get_f64_type());
                 let location = Location::new(&self.context);
                 match op {
-                    '+' => Ok(Value::from(AddOp::new(location, lhs, rhs))),
-                    '*' => Ok(Value::from(MulOp::new(location, lhs, rhs))),
+                    '+' => {
+                        let op = AddOp::new(location, lhs, rhs);
+                        self.builder.insert(Operation::from(op.clone()));
+                        Ok(Value::from(op))
+                    }
+                    '*' => {
+                        let op = MulOp::new(location, lhs, rhs, result_type);
+                        self.builder.insert(Operation::from(op.clone()));
+                        Ok(Value::from(op))
+                    }
                     _ => Err("Invalid binary operation"),
                 }
             }
