@@ -4,12 +4,13 @@ pub mod toy;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 
+use libc::CS;
 use std::rc::Rc;
 use toy::mlirGetDialectHandle__toy__;
 
 use mlir_sys::{
     mlirAttributeGetNull, mlirAttributeParseGet, mlirBlockAddArgument, mlirBlockCreate,
-    mlirBlockInsertOwnedOperation, mlirBlockInsertOwnedOperationAfter,
+    mlirBlockGetArgument, mlirBlockInsertOwnedOperation, mlirBlockInsertOwnedOperationAfter,
     mlirContextAppendDialectRegistry, mlirContextCreate, mlirContextGetNumLoadedDialects,
     mlirContextGetNumRegisteredDialects, mlirContextGetOrLoadDialect,
     mlirContextSetAllowUnregisteredDialects, mlirDenseElementsAttrDoubleGet,
@@ -28,8 +29,8 @@ use mlir_sys::{
     mlirRegisterLinalgLinalgLowerToLoops, mlirShapedTypeGetDimSize, mlirShapedTypeGetRank,
     mlirStringAttrGet, mlirStringRefCreateFromCString, mlirSymbolRefAttrGet, mlirTypeDump,
     mlirTypeIsAFunction, mlirTypeIsANone, mlirTypeIsARankedTensor, mlirTypeIsATensor,
-    mlirTypeIsAUnrankedTensor, mlirUnrankedTensorTypeGet, mlirValueDump, mlirValueGetType,
-    mlirValueIsABlockArgument,
+    mlirTypeIsAUnrankedTensor, mlirTypeParseGet, mlirUnrankedTensorTypeGet, mlirValueDump,
+    mlirValueGetType, mlirValueIsABlockArgument,
 };
 use mlir_sys::{
     MlirAttribute, MlirBlock, MlirContext, MlirDialectHandle, MlirLocation, MlirModule,
@@ -688,14 +689,26 @@ impl FuncOp {
             let mlir_context = mlirLocationGetContext(location.instance);
             let mlir_region = mlirRegionCreate();
             let p_mlir_region: *const MlirRegion = &mlir_region;
-            let num_args = 0;
-            let mut args = mlirNoneTypeGet(mlir_context);
-            let p_args: *mut MlirType = &mut args;
+
+            let arg_string_types: Vec<String> = Self::extract_arg_types(&func_type).unwrap();
+            let arg_cstring_types: Vec<CString> = arg_string_types
+                .into_iter()
+                .map(|x| CString::new(x).unwrap())
+                .collect();
+            let num_args = arg_cstring_types.len() as isize;
+
+            let args: Vec<MlirType> = arg_cstring_types
+                .into_iter()
+                .map(|x| mlirTypeParseGet(mlir_context, mlirStringRefCreateFromCString(x.as_ptr())))
+                .collect();
+
+            let p_args: *const MlirType = args.as_ptr();
             let p_locs = &mut location.instance;
+
             let mlir_block = mlirBlockCreate(num_args, p_args, p_locs);
             mlirRegionAppendOwnedBlock(mlir_region, mlir_block);
 
-            let func_type_string: String = Self::serialize_func_type(func_type).unwrap();
+            let func_type_string: String = Self::serialize_func_type(&func_type).unwrap();
             println!("Serialized func type {}", func_type_string);
 
             let string_func_attr = CString::new(func_type_string).unwrap();
@@ -752,7 +765,7 @@ impl FuncOp {
         }
     }
 
-    fn serialize_func_type(func_type: Type) -> Result<String, &'static str> {
+    fn serialize_func_type(func_type: &Type) -> Result<String, &'static str> {
         unsafe {
             if !mlirTypeIsAFunction(func_type.instance) {
                 return Err("Provided type is not a function type");
@@ -800,6 +813,39 @@ impl FuncOp {
                 }
             }
             result.push(')');
+            Ok(result)
+        }
+    }
+
+    fn extract_arg_types(func_type: &Type) -> Result<Vec<String>, &'static str> {
+        unsafe {
+            if !mlirTypeIsAFunction(func_type.instance) {
+                return Err("Provided type is not a function type");
+            }
+
+            let mut result = Vec::new();
+            let num_inputs = mlirFunctionTypeGetNumInputs(func_type.instance);
+            for pos in 0..num_inputs {
+                let mut arg_string = String::new();
+                let arg = mlirFunctionTypeGetInput(func_type.instance, pos);
+                if mlirTypeIsATensor(arg) {
+                    arg_string.push_str("tensor<");
+                    if mlirTypeIsARankedTensor(arg) {
+                        let rank = mlirShapedTypeGetRank(arg);
+                        for r in 0..rank {
+                            let dim = mlirShapedTypeGetDimSize(arg, r as isize);
+                            arg_string.push_str(&dim.to_string());
+                            arg_string.push(',');
+                        }
+                    } else if mlirTypeIsAUnrankedTensor(arg) {
+                        // FIXME: parse elem type
+                        arg_string.push_str("?xf64");
+                    }
+                    arg_string.push('>');
+                }
+                result.push(arg_string);
+            }
+
             Ok(result)
         }
     }
@@ -988,12 +1034,12 @@ impl<'ctx> MLIRGen {
         let proto_args = function_ast.prototype.args.clone();
         // FIXME: just for the sake of adding something into the table
         // need to review how it is done in original Toy tutorial
+        let mut pos = 0;
         for arg in proto_args {
             unsafe {
-                let arg_type = mlirNoneTypeGet(self.context.instance);
-                let location = Location::new(&self.context);
-                let value = mlirBlockAddArgument(entry_block.instance, arg_type, location.instance);
-                self.declare(arg, Value::new(value));
+                let mlir_arg_value = mlirBlockGetArgument(entry_block.instance, pos);
+                self.declare(arg, Value::new(mlir_arg_value));
+                pos += 1;
             }
         }
         // TODO: declare all the function arguments in the symbol table
@@ -1068,20 +1114,14 @@ impl<'ctx> MLIRGen {
                 let mut data: Vec<f64> = Vec::new();
                 data.reserve(size);
                 self.collect_data(clone_expr, &mut data);
-                let ty = Type::new(&self.context);
                 // TODO: contruct ConstanOp with array
                 let elem_ty = self.builder.get_f64_type();
                 let data_ty = self.builder.get_ranked_tensor_type(dims, elem_ty);
-                if data_ty.instance.ptr.is_null() {
-                    panic!("Type is null");
-                }
-                let data_attr: Attribute = self.builder.get_dense_elements_attr(data_ty, data);
-                if data_attr.instance.ptr.is_null() {
-                    panic!("Attr is null");
-                }
+                let data_attr: Attribute =
+                    self.builder.get_dense_elements_attr(data_ty.clone(), data);
                 // TODO: a separate builder for constructing a type?
                 let mut op = ConstantOp::new(Location::new(&self.context));
-                op.with_result(ty).with_attribute(data_attr).build();
+                op.with_result(data_ty).with_attribute(data_attr).build();
                 self.builder.insert(Operation::from(op.clone()));
                 Ok(Value::from(op))
             }
