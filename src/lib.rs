@@ -37,7 +37,9 @@ use mlir_sys::{
     MlirNamedAttribute, MlirOperation, MlirOperationState, MlirRegion, MlirType, MlirValue,
 };
 
-use crate::parser::Expr::{Binary, Call, ExprList, Number, Return, Tensor, VarDecl, Variable};
+use crate::parser::Expr::{
+    Binary, Call, ExprList, Number, Print, Return, Tensor, VarDecl, Variable,
+};
 use parser::{Expr, Function, Module, Prototype};
 pub trait Dialect {
     fn get_name(&self) -> String;
@@ -58,38 +60,11 @@ impl Context {
     pub fn new() -> Self {
         unsafe {
             let instance = mlirContextCreate();
-            // FIXME: let's register all dialects
-            // let registry = mlirDialectRegistryCreate();
-            println!(
-                "Registered dialects num {}",
-                mlirContextGetNumRegisteredDialects(instance)
-            );
-            println!(
-                "Load dialects num {}",
-                mlirContextGetNumLoadedDialects(instance)
-            );
             // FIXME: make dialects to be registered separately
             mlirRegisterAllDialects(instance);
-            // mlirContextSetAllowUnregisteredDialects(instance, true);
-            println!(
-                "Registered dialects num {}",
-                mlirContextGetNumRegisteredDialects(instance)
-            );
-            println!(
-                "Load dialects num {}",
-                mlirContextGetNumLoadedDialects(instance)
-            );
             let handle = mlir_sys::MlirDialectHandle::from(mlirGetDialectHandle__toy__());
             mlirDialectHandleRegisterDialect(handle, instance);
             mlirDialectHandleLoadDialect(handle, instance);
-            println!(
-                "Registered dialects num {}",
-                mlirContextGetNumRegisteredDialects(instance)
-            );
-            println!(
-                "Load dialects num {}",
-                mlirContextGetNumLoadedDialects(instance)
-            );
             Self {
                 instance,
                 dialects: Vec::new(),
@@ -114,7 +89,6 @@ impl Default for Context {
 pub struct ToyDialect {
     // context: &'a Context,
     // name
-    ops: Vec<Box<dyn Op>>,
     name: CString,
 }
 
@@ -128,13 +102,12 @@ impl ToyDialect {
                 mlirStringRefCreateFromCString(name.as_ptr()),
             );
             // mlirDialectHandleInsertDialect(arg1, arg2)
-            if (dialect.ptr.is_null()) {
+            if dialect.ptr.is_null() {
                 panic!("Cannot load Toy dialect");
             }
             mlirRegisterLinalgLinalgLowerToLoops()
         }
-        let ops: Vec<Box<dyn Op>> = vec![Box::new(PrintOp::default())];
-        Self { ops, name }
+        Self { name }
     }
 }
 
@@ -596,26 +569,52 @@ impl From<MulOp> for Operation {
     }
 }
 
+#[derive(Clone)]
 struct PrintOp {
     name: String,
+    instance: MlirOperation,
+    input: Value,
+    state: OperationState,
 }
 
 impl PrintOp {
-    pub fn new() -> Self {
-        let name = String::from("Print");
-        Self { name }
+    pub fn new(location: Location, input: Value) -> Self {
+        unsafe {
+            // FIXME: duplication toy.constant
+            let name = String::from("toy.print");
+            let mut state = OperationState::new("toy.print", location);
+            let p_state: *mut MlirOperationState = &mut state.instance;
+
+            // TODO: let extract to builder
+            let p_operands: *const MlirValue = &input.instance;
+            mlirOperationStateAddOperands(p_state, 1, p_operands);
+
+            let instance = mlirOperationCreate(p_state);
+
+            Self {
+                name,
+                instance,
+                input,
+                state,
+            }
+        }
     }
 }
 
-impl Default for PrintOp {
-    fn default() -> Self {
-        Self::new()
+impl From<PrintOp> for Value {
+    fn from(op: PrintOp) -> Self {
+        // use op to construct Value
+        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
+        Value::new(instance)
     }
 }
 
-impl Op for PrintOp {
-    fn build(&self) -> Self {
-        Self::new()
+impl From<PrintOp> for Operation {
+    fn from(op: PrintOp) -> Self {
+        Self {
+            state: op.state,
+            instance: op.instance,
+        }
     }
 }
 
@@ -709,7 +708,6 @@ impl FuncOp {
             mlirRegionAppendOwnedBlock(mlir_region, mlir_block);
 
             let func_type_string: String = Self::serialize_func_type(&func_type).unwrap();
-            println!("Serialized func type {}", func_type_string);
 
             let string_func_attr = CString::new(func_type_string).unwrap();
             let func_type_attr = mlirAttributeParseGet(
@@ -868,12 +866,6 @@ impl From<FuncOp> for Value {
     }
 }
 
-pub trait Op {
-    fn build(&self) -> Self
-    where
-        Self: Sized;
-}
-
 #[derive(Clone)]
 struct Type {
     instance: MlirType,
@@ -941,7 +933,6 @@ impl<'ctx> OpBuilder {
 
     // TODO: redundant copies of dims
     fn get_ranked_tensor_type(&self, dims: Vec<usize>, elem_ty: Type) -> Type {
-        println!("Dims size = {}", dims.len());
         let rank: isize = dims.len() as isize;
         let shape: Vec<i64> = dims.into_iter().map(|x| x as i64).collect();
         let p_shape = shape.as_ptr();
@@ -1104,13 +1095,7 @@ impl<'ctx> MLIRGen {
                 values,
                 dims,
             } => {
-                println!("Dims result");
-                for i in &dims {
-                    println!("{}", i);
-                }
                 let size = dims.iter().product();
-                println!("Dim before = {}", size);
-                println!("Dim before = {}", dims.len());
                 let mut data: Vec<f64> = Vec::new();
                 data.reserve(size);
                 self.collect_data(clone_expr, &mut data);
@@ -1162,10 +1147,8 @@ impl<'ctx> MLIRGen {
                 let op = GenericCallOp::new(location, fn_name, operands, result_type);
                 self.builder.insert(Operation::from(op.clone()));
                 let value = Value::from(op);
-                println!("Call value");
                 unsafe { mlirValueDump(value.instance) };
                 Ok(value)
-                // Ok(Value::from(op))
             }
             Return {
                 location: _,
@@ -1198,6 +1181,17 @@ impl<'ctx> MLIRGen {
                     }
                     _ => Err("Invalid binary operation"),
                 }
+            }
+
+            Print {
+                location: _,
+                expression,
+            } => {
+                let location = Location::new(&self.context);
+                let value = self.mlir_gen_expression(*expression).unwrap();
+                let op = PrintOp::new(location, value);
+                self.builder.insert(Operation::from(op.clone()));
+                Ok(Value::from(op))
             }
             _ => {
                 panic!("Unknown expression");

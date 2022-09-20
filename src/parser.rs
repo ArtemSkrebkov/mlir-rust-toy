@@ -37,6 +37,7 @@ pub enum Token {
     AngleLeft,
     AngleRight,
     Return,
+    Print,
 }
 
 pub struct VarType {
@@ -300,6 +301,10 @@ pub enum Expr {
         expressions: Vec<Box<Expr>>,
     },
     Return {
+        location: Location,
+        expression: Box<Expr>,
+    },
+    Print {
         location: Location,
         expression: Box<Expr>,
     },
@@ -631,6 +636,17 @@ impl<'a> Parser<'a> {
                 }
 
                 self.advance();
+
+                if id == String::from("print") {
+                    if args.len() != 1 {
+                        return Err("Print must have single argument");
+                    }
+                    let location = self.last_location();
+                    return Ok(Expr::Print {
+                        location,
+                        expression: Box::new(args[0].clone()),
+                    });
+                }
 
                 Ok(Expr::Call { fn_name: id, args })
             }
