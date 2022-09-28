@@ -6,7 +6,7 @@ use std::iter::Peekable;
 use std::ops::DerefMut;
 use std::str::Chars;
 
-use crate::parser::Token::*;
+use crate::toy::parser::Token::*;
 
 const ANONYMOUS_FUNCTION_NAME: &str = "anonymous";
 

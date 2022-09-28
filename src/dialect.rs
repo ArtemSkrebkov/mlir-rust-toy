@@ -3,15 +3,16 @@ use mlir_sys::{
     mlirStringRefCreateFromCString, MlirDialectHandle,
 };
 
-use crate::{context::Context, toy};
+use crate::context::Context;
+use crate::toy;
 use std::ffi::{CStr, CString};
 
 pub trait Dialect {
     fn get_name(&self) -> String;
 }
 
-impl From<toy::MlirDialectHandle> for mlir_sys::MlirDialectHandle {
-    fn from(dialect: toy::MlirDialectHandle) -> Self {
+impl From<toy::ffi::MlirDialectHandle> for mlir_sys::MlirDialectHandle {
+    fn from(dialect: toy::ffi::MlirDialectHandle) -> Self {
         Self { ptr: dialect.ptr }
     }
 }

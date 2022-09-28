@@ -4,7 +4,7 @@ use mlir_sys::{
     mlirRegisterAllDialects, MlirContext,
 };
 
-use crate::toy::mlirGetDialectHandle__toy__;
+use crate::toy::ffi::mlirGetDialectHandle__toy__;
 
 pub struct Context {
     pub(crate) instance: MlirContext,

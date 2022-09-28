@@ -1,5 +1,4 @@
-#![allow(non_upper_case_globals)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
-
-include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+pub mod ffi;
+pub mod mlir_gen;
+pub mod parser;
+pub mod toy_dialect;
