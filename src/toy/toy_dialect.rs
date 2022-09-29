@@ -2,14 +2,53 @@ use mlir_sys::{
     mlirFlatSymbolRefAttrGet, mlirIdentifierGet, mlirLocationGetContext, mlirNamedAttributeGet,
     mlirOperationCreate, mlirOperationGetResult, mlirOperationStateAddAttributes,
     mlirOperationStateAddOperands, mlirOperationStateAddResults, mlirStringRefCreateFromCString,
-    MlirNamedAttribute, MlirOperation, MlirOperationState, MlirType, MlirValue,
+    MlirDialectHandle, MlirNamedAttribute, MlirOperation, MlirOperationState, MlirType, MlirValue,
 };
 
+use crate::context::Context;
+use crate::dialect::Dialect;
 use crate::location::Location;
 use crate::misc::{Attribute, Type, Value};
 use crate::operation::{Operation, OperationState};
+use crate::toy;
 
 use std::ffi::CString;
+
+use crate::toy::ffi::mlirGetDialectHandle__toy__;
+
+impl From<toy::ffi::MlirDialectHandle> for mlir_sys::MlirDialectHandle {
+    fn from(dialect: toy::ffi::MlirDialectHandle) -> Self {
+        Self { ptr: dialect.ptr }
+    }
+}
+
+pub struct ToyDialect {
+    name: CString,
+    instance: MlirDialectHandle,
+}
+
+impl ToyDialect {
+    pub fn new(_context: &Context) -> Self {
+        let name = CString::new("toy").unwrap();
+        unsafe {
+            let instance = mlir_sys::MlirDialectHandle::from(mlirGetDialectHandle__toy__());
+            if instance.ptr.is_null() {
+                panic!("Cannot load Toy dialect");
+            }
+            Self { name, instance }
+        }
+    }
+}
+
+impl Dialect for ToyDialect {
+    fn get_name(&self) -> String {
+        String::from("toy")
+    }
+
+    fn handle(&self) -> MlirDialectHandle {
+        self.instance
+    }
+}
 #[derive(Clone)]
 pub struct ConstantOp {
     name: String,

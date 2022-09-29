@@ -9,14 +9,15 @@ pub mod toy;
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::collections::HashMap;
     use std::rc::Rc;
 
     use crate::context::Context;
     use crate::dialect::StandardDialect;
-    use crate::dialect::ToyDialect;
     use crate::toy::mlir_gen::MLIRGen;
     use crate::toy::parser;
+    use crate::toy::toy_dialect::ToyDialect;
 
     #[test]
     fn create_context() {
@@ -56,9 +57,8 @@ mod tests {
         prec.insert('/', 40);
 
         let context = Rc::new(Context::default());
-        // Need to make it mutable
-        // let dialect = ToyDialect::new(&context);
-        // context.load_dialect(Box::new(dialect));
+        let dialect = ToyDialect::new(&context);
+        context.load_dialect(Box::new(dialect));
 
         let module = parser::Parser::new(content, &mut prec)
             .parse_module()
@@ -86,7 +86,7 @@ mod tests {
         let context = Rc::new(Context::default());
         // Need to make it mutable
         let dialect = ToyDialect::new(&context);
-        // context.load_dialect(Box::new(dialect));
+        context.load_dialect(Box::new(dialect));
         let module = parser::Parser::new(content, &mut prec)
             .parse_module()
             .unwrap();

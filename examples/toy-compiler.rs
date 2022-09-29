@@ -2,6 +2,7 @@ use clap::Parser;
 use rsml::context::Context;
 use rsml::toy;
 use rsml::toy::mlir_gen::MLIRGen;
+use rsml::toy::toy_dialect::ToyDialect;
 use std::collections::HashMap;
 use std::env;
 use std::rc::Rc;
@@ -40,6 +41,8 @@ fn main() {
         }
     } else if args.emit == String::from("mlir") {
         let context = Rc::new(Context::default());
+        let dialect = ToyDialect::new(&context);
+        context.load_dialect(Box::new(dialect));
         let module = MLIRGen::new(Rc::clone(&context)).mlir_gen(module);
         module.dump();
     }
