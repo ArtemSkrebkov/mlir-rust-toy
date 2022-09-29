@@ -1,6 +1,6 @@
 use crate::block::Block;
 use crate::location::Location;
-use crate::misc::{Type, Value};
+use crate::misc::{NamedAttribute, Type, Value};
 
 use mlir_sys::{
     mlirAttributeParseGet, mlirBlockCreate, mlirBlockInsertOwnedOperation,
@@ -8,8 +8,8 @@ use mlir_sys::{
     mlirFunctionTypeGetResult, mlirIdentifierGet, mlirLocationGetContext, mlirModuleCreateEmpty,
     mlirModuleGetBody, mlirModuleGetOperation, mlirNamedAttributeGet, mlirOperationCreate,
     mlirOperationDump, mlirOperationGetResult, mlirOperationStateAddAttributes,
-    mlirOperationStateAddOwnedRegions, mlirOperationStateGet, mlirRegionAppendOwnedBlock,
-    mlirRegionCreate, mlirShapedTypeGetDimSize, mlirShapedTypeGetRank,
+    mlirOperationStateAddOwnedRegions, mlirOperationStateAddResults, mlirOperationStateGet,
+    mlirRegionAppendOwnedBlock, mlirRegionCreate, mlirShapedTypeGetDimSize, mlirShapedTypeGetRank,
     mlirStringRefCreateFromCString, mlirTypeIsAFunction, mlirTypeIsARankedTensor,
     mlirTypeIsATensor, mlirTypeIsAUnrankedTensor, mlirTypeParseGet, MlirModule, MlirNamedAttribute,
     MlirOperation, MlirOperationState, MlirRegion, MlirType,
@@ -33,6 +33,22 @@ impl OperationState {
         Self { instance, string }
         // Self { instance }
     }
+
+    pub(crate) fn add_results(&mut self, results: Vec<Type>) {
+        let results: Vec<MlirType> = results.into_iter().map(|x| x.instance).collect();
+        let p_state: *mut MlirOperationState = &mut self.instance;
+
+        unsafe { mlirOperationStateAddResults(p_state, results.len() as isize, results.as_ptr()) };
+    }
+
+    pub(crate) fn add_attributes(&mut self, attrs: Vec<NamedAttribute>) {
+        let attrs: Vec<MlirNamedAttribute> = attrs.into_iter().map(|x| x.instance).collect();
+        let p_state: *mut MlirOperationState = &mut self.instance;
+        let p_named_attr: *const MlirNamedAttribute = attrs.as_ptr();
+        unsafe {
+            mlirOperationStateAddAttributes(p_state, attrs.len() as isize, p_named_attr);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -42,10 +58,24 @@ pub struct Operation {
 }
 
 impl Operation {
-    fn new(mut state: OperationState) -> Self {
+    pub fn new(mut state: OperationState) -> Self {
         let p_state: *mut MlirOperationState = &mut state.instance;
         let instance = unsafe { mlirOperationCreate(p_state) };
         Self { state, instance }
+    }
+}
+
+impl From<Operation> for Value {
+    fn from(operation: Operation) -> Self {
+        let instance = unsafe { mlirOperationGetResult(operation.instance, 0) };
+        Value::new(instance)
+    }
+}
+
+impl From<&mut Operation> for Value {
+    fn from(operation: &mut Operation) -> Self {
+        let instance = unsafe { mlirOperationGetResult(operation.instance, 0) };
+        Value::new(instance)
     }
 }
 

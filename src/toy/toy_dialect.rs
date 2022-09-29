@@ -8,8 +8,8 @@ use mlir_sys::{
 use crate::context::Context;
 use crate::dialect::Dialect;
 use crate::location::Location;
-use crate::misc::{Attribute, Type, Value};
-use crate::operation::{Operation, OperationState};
+use crate::misc::{Attribute, NamedAttribute, Type, Value};
+use crate::operation::{self, Operation, OperationState};
 use crate::toy;
 
 use std::ffi::CString;
@@ -52,28 +52,25 @@ impl Dialect for ToyDialect {
 #[derive(Clone)]
 pub struct ConstantOp {
     name: String,
-    instance: MlirOperation,
-    value: f64,
-    state: OperationState,
     location: Location,
+    state: OperationState,
+    // TODO: add accessor?
+    pub operation: Operation,
+    value: f64,
 }
 
 impl ConstantOp {
     pub fn new(location: Location) -> Self {
-        unsafe {
-            // FIXME: duplication toy.constant
-            let name = String::from("toy.constant");
-            let mut state = OperationState::new("toy.constant", location.clone());
-            let p_state: *mut MlirOperationState = &mut state.instance;
-            let instance = mlirOperationCreate(p_state);
+        let name = String::from("toy.constant");
+        let state = OperationState::new("toy.constant", location.clone());
+        let operation = Operation::new(state.clone());
 
-            Self {
-                name,
-                instance,
-                value: 0.0,
-                state,
-                location,
-            }
+        Self {
+            name,
+            operation,
+            value: 0.0,
+            state,
+            location,
         }
     }
 
@@ -83,53 +80,22 @@ impl ConstantOp {
     }
 
     pub fn with_result(&mut self, result_type: Type) -> &mut Self {
-        let results: Vec<MlirType> = vec![result_type.instance; 1];
-        let p_state: *mut MlirOperationState = &mut self.state.instance;
-        unsafe { mlirOperationStateAddResults(p_state, 1, results.as_ptr()) };
+        let results = vec![result_type; 1];
+        self.state.add_results(results);
         self
     }
 
-    pub(crate) fn with_attribute(&mut self, data_attr: Attribute) -> &mut Self {
-        unsafe {
-            let mlir_context = mlirLocationGetContext(self.location.instance);
-            let p_state: *mut MlirOperationState = &mut self.state.instance;
-            let string_value_id = CString::new("value").unwrap();
-            let value_id = mlirIdentifierGet(
-                mlir_context,
-                mlirStringRefCreateFromCString(string_value_id.as_ptr()),
-            );
-            let named_data_attr = mlirNamedAttributeGet(value_id, data_attr.instance);
-            let p_named_data_attr: *const MlirNamedAttribute = &named_data_attr;
-            mlirOperationStateAddAttributes(p_state, 1, p_named_data_attr)
-        }
+    pub fn with_attribute(&mut self, attr: Attribute) -> &mut Self {
+        let named_attr = NamedAttribute::new("value", attr);
+        self.state.add_attributes(vec![named_attr; 1]);
         self
     }
 
     pub(crate) fn build(&mut self) -> &mut Self {
-        unsafe {
-            // FIXME: here we create op one more time despite it was created in new method
-            let p_state: *mut MlirOperationState = &mut self.state.instance;
-            let instance = mlirOperationCreate(p_state);
-            self.instance = instance;
+        // FIXME: here we create op one more time despite it was created in new method
+        self.operation = Operation::new(self.state.clone());
 
-            self
-        }
-    }
-}
-
-impl From<ConstantOp> for Value {
-    fn from(op: ConstantOp) -> Self {
-        // use op to construct Value
-        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
-        Value::new(instance)
-    }
-}
-
-impl From<&mut ConstantOp> for Value {
-    fn from(op: &mut ConstantOp) -> Self {
-        // use op to construct Value
-        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
-        Value::new(instance)
+        self
     }
 }
 
@@ -137,7 +103,7 @@ impl From<ConstantOp> for Operation {
     fn from(op: ConstantOp) -> Self {
         Self {
             state: op.state,
-            instance: op.instance,
+            instance: op.operation.instance,
         }
     }
 }
@@ -467,5 +433,35 @@ impl From<PrintOp> for Operation {
             state: op.state,
             instance: op.instance,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use crate::op_builder::OpBuilder;
+
+    use super::*;
+
+    #[test]
+    fn create_constant() {
+        let context = Rc::new(Context::default());
+        // Need to make it mutable
+        let dialect = ToyDialect::new(&context);
+        context.load_dialect(Box::new(dialect));
+        let location = Location::new(&context);
+        let mut constant = ConstantOp::new(location);
+
+        let op_builder = OpBuilder::new(None, 0, context);
+        let result_type = op_builder.get_f64_type();
+        let ty = op_builder.get_f64_type();
+        let ty = op_builder.get_ranked_tensor_type(vec![3, 1], ty);
+        let attr: Attribute = op_builder.get_dense_elements_attr(ty.clone(), vec![1.0, 1.0, 1.0]);
+        constant
+            .with_value(1.0)
+            .with_result(result_type)
+            .with_attribute(attr)
+            .build();
     }
 }

@@ -142,14 +142,14 @@ impl<'ctx> MLIRGen {
                 let mut op = ConstantOp::new(Location::new(&self.context));
                 op.with_result(data_ty).with_attribute(data_attr).build();
                 self.builder.insert(Operation::from(op.clone()));
-                Ok(Value::from(op))
+                Ok(Value::from(op.operation))
             }
             Number(num) => {
                 let location = Location::new(&self.context);
                 let mut op = ConstantOp::new(location);
                 op.with_value(num);
                 self.builder.insert(Operation::from(op.clone()));
-                Ok(Value::from(op))
+                Ok(Value::from(op.operation))
             }
             Call { fn_name, args } => {
                 let location = Location::new(&self.context);
