@@ -8,11 +8,12 @@ use mlir_sys::{
     mlirFunctionTypeGetResult, mlirIdentifierGet, mlirLocationGetContext, mlirModuleCreateEmpty,
     mlirModuleGetBody, mlirModuleGetOperation, mlirNamedAttributeGet, mlirOperationCreate,
     mlirOperationDump, mlirOperationGetResult, mlirOperationStateAddAttributes,
-    mlirOperationStateAddOwnedRegions, mlirOperationStateAddResults, mlirOperationStateGet,
-    mlirRegionAppendOwnedBlock, mlirRegionCreate, mlirShapedTypeGetDimSize, mlirShapedTypeGetRank,
-    mlirStringRefCreateFromCString, mlirTypeIsAFunction, mlirTypeIsARankedTensor,
-    mlirTypeIsATensor, mlirTypeIsAUnrankedTensor, mlirTypeParseGet, MlirModule, MlirNamedAttribute,
-    MlirOperation, MlirOperationState, MlirRegion, MlirType,
+    mlirOperationStateAddOperands, mlirOperationStateAddOwnedRegions, mlirOperationStateAddResults,
+    mlirOperationStateGet, mlirRegionAppendOwnedBlock, mlirRegionCreate, mlirShapedTypeGetDimSize,
+    mlirShapedTypeGetRank, mlirStringRefCreateFromCString, mlirTypeIsAFunction,
+    mlirTypeIsARankedTensor, mlirTypeIsATensor, mlirTypeIsAUnrankedTensor, mlirTypeParseGet,
+    MlirModule, MlirNamedAttribute, MlirOperation, MlirOperationState, MlirRegion, MlirType,
+    MlirValue,
 };
 use std::ffi::CString;
 use std::rc::Rc;
@@ -47,6 +48,16 @@ impl OperationState {
         let p_named_attr: *const MlirNamedAttribute = attrs.as_ptr();
         unsafe {
             mlirOperationStateAddAttributes(p_state, attrs.len() as isize, p_named_attr);
+        }
+    }
+
+    pub(crate) fn add_operands(&mut self, operands: Vec<Value>) {
+        let operands: Vec<MlirValue> = operands.into_iter().map(|x| x.instance).collect();
+
+        let p_state: *mut MlirOperationState = &mut self.instance;
+        let p_operands: *const MlirValue = operands.as_ptr();
+        unsafe {
+            mlirOperationStateAddOperands(p_state, 1, p_operands);
         }
     }
 }

@@ -111,44 +111,26 @@ impl From<ConstantOp> for Operation {
 #[derive(Clone)]
 pub struct TransposeOp {
     name: String,
-    instance: MlirOperation,
-    input: Value,
     state: OperationState,
+    pub operation: Operation,
 }
 
 // TODO: implementation looks the same to ConstantOp, besides the name
 impl TransposeOp {
     pub fn new(location: Location, input: Value, result_type: Type) -> Self {
-        unsafe {
-            // FIXME: duplication toy.constant
-            let name = String::from("toy.transpose");
-            let mut state = OperationState::new("toy.transpose", location);
-            let p_state: *mut MlirOperationState = &mut state.instance;
+        let name = String::from("toy.transpose");
+        let mut state = OperationState::new("toy.transpose", location);
 
-            // TODO: extract to builder
-            let p_operands: *const MlirValue = &input.instance;
-            mlirOperationStateAddOperands(p_state, 1, p_operands);
+        state.add_results(vec![result_type; 1]);
+        state.add_operands(vec![input; 1]);
 
-            // TODO: extract to builder
-            let results: Vec<MlirType> = vec![result_type.instance; 1];
-            unsafe { mlirOperationStateAddResults(p_state, 1, results.as_ptr()) };
+        let operation = Operation::new(state.clone());
 
-            let instance = mlirOperationCreate(p_state);
-            Self {
-                name,
-                instance,
-                input,
-                state,
-            }
+        Self {
+            name,
+            state,
+            operation,
         }
-    }
-}
-
-impl From<TransposeOp> for Value {
-    fn from(op: TransposeOp) -> Self {
-        // use op to construct Value
-        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
-        Value::new(instance)
     }
 }
 
@@ -156,7 +138,7 @@ impl From<TransposeOp> for Operation {
     fn from(op: TransposeOp) -> Self {
         Self {
             state: op.state,
-            instance: op.instance,
+            instance: op.operation.instance,
         }
     }
 }
@@ -164,10 +146,9 @@ impl From<TransposeOp> for Operation {
 #[derive(Clone)]
 pub struct GenericCallOp {
     name: String,
-    instance: MlirOperation,
-    // callee: String,
-    // operands: Vec<Value>,
+    callee: String,
     state: OperationState,
+    pub operation: Operation,
 }
 
 // TODO: implementation looks the same to ConstantOp, besides the name
@@ -178,54 +159,23 @@ impl GenericCallOp {
         operands: Vec<Value>,
         result_type: Type,
     ) -> Self {
-        unsafe {
-            // FIXME: duplication toy.constant
-            let mlir_context = mlirLocationGetContext(location.instance);
-            let name = String::from("toy.generic_call");
-            let mut state = OperationState::new("toy.generic_call", location);
-            let p_state: *mut MlirOperationState = &mut state.instance;
+        let name = String::from("toy.generic_call");
+        let mut state = OperationState::new("toy.generic_call", location.clone());
+        state.add_operands(operands);
+        state.add_results(vec![result_type; 1]);
 
-            let operands: Vec<MlirValue> = operands.into_iter().map(|v| v.instance).collect();
-            let p_operands: *const MlirValue = operands.as_ptr();
-            mlirOperationStateAddOperands(p_state, operands.len() as isize, p_operands);
+        let attr = Attribute::new_flat_symbol_ref(location.context(), &callee);
+        let named_attr = NamedAttribute::new("callee", attr);
 
-            let p_results: *const MlirType = &result_type.instance;
-            mlirOperationStateAddResults(p_state, 1, p_results);
+        state.add_attributes(vec![named_attr; 1]);
+        let operation = Operation::new(state.clone());
 
-            // let mlir_context = mlirLocationGetContext(location.instance);
-
-            let string_callee_id = CString::new("callee").unwrap();
-            let callee_id = mlirIdentifierGet(
-                mlir_context,
-                mlirStringRefCreateFromCString(string_callee_id.as_ptr()),
-            );
-
-            let s = CString::new(callee).unwrap();
-            let data_attr =
-                mlirFlatSymbolRefAttrGet(mlir_context, mlirStringRefCreateFromCString(s.as_ptr()));
-
-            let named_data_attr = mlirNamedAttributeGet(callee_id, data_attr);
-            let p_named_data_attr: *const MlirNamedAttribute = &named_data_attr;
-
-            mlirOperationStateAddAttributes(p_state, 1, p_named_data_attr);
-            let instance = mlirOperationCreate(p_state);
-
-            Self {
-                name,
-                instance,
-                // callee,
-                // operands,
-                state,
-            }
+        Self {
+            name,
+            state,
+            callee,
+            operation,
         }
-    }
-}
-
-impl From<GenericCallOp> for Value {
-    fn from(op: GenericCallOp) -> Self {
-        // use op to construct Value
-        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
-        Value::new(instance)
     }
 }
 
@@ -233,7 +183,7 @@ impl From<GenericCallOp> for Operation {
     fn from(op: GenericCallOp) -> Self {
         Self {
             state: op.state,
-            instance: op.instance,
+            instance: op.operation.instance,
         }
     }
 }
@@ -241,40 +191,23 @@ impl From<GenericCallOp> for Operation {
 #[derive(Clone)]
 pub struct ReturnOp {
     name: String,
-    instance: MlirOperation,
-    input: Value,
     state: OperationState,
+    pub operation: Operation,
 }
 
 impl ReturnOp {
     pub fn new(location: Location, input: Value) -> Self {
-        unsafe {
-            // FIXME: duplication toy.constant
-            let name = String::from("toy.return");
-            let mut state = OperationState::new("toy.return", location);
-            let p_state: *mut MlirOperationState = &mut state.instance;
+        let name = String::from("toy.return");
+        let mut state = OperationState::new("toy.return", location);
+        state.add_operands(vec![input; 1]);
 
-            // TODO: let extract to builder
-            let p_operands: *const MlirValue = &input.instance;
-            mlirOperationStateAddOperands(p_state, 1, p_operands);
+        let operation = Operation::new(state.clone());
 
-            let instance = mlirOperationCreate(p_state);
-
-            Self {
-                name,
-                instance,
-                input,
-                state,
-            }
+        Self {
+            name,
+            state,
+            operation,
         }
-    }
-}
-
-impl From<ReturnOp> for Value {
-    fn from(op: ReturnOp) -> Self {
-        // use op to construct Value
-        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
-        Value::new(instance)
     }
 }
 
@@ -282,7 +215,7 @@ impl From<ReturnOp> for Operation {
     fn from(op: ReturnOp) -> Self {
         Self {
             state: op.state,
-            instance: op.instance,
+            instance: op.operation.instance,
         }
     }
 }
@@ -290,37 +223,27 @@ impl From<ReturnOp> for Operation {
 #[derive(Clone)]
 pub(crate) struct AddOp {
     name: String,
-    instance: MlirOperation,
-    lhs: Value,
-    rhs: Value,
     state: OperationState,
+    pub operation: Operation,
 }
 
 impl AddOp {
     pub fn new(location: Location, lhs: Value, rhs: Value) -> Self {
-        unsafe {
-            // FIXME: duplication toy.constant
-            let name = String::from("toy.add");
-            let mut state = OperationState::new("toy.add", location);
-            let p_state: *mut MlirOperationState = &mut state.instance;
-            let instance = mlirOperationCreate(p_state);
+        let name = String::from("toy.add");
+        let mut state = OperationState::new("toy.add", location);
 
-            Self {
-                name,
-                instance,
-                lhs,
-                rhs,
-                state,
-            }
+        let operands = vec![lhs, rhs];
+        state.add_operands(operands);
+
+        // state.add_results(vec![result_type; 1]);
+
+        let operation = Operation::new(state.clone());
+
+        Self {
+            name,
+            state,
+            operation,
         }
-    }
-}
-
-impl From<AddOp> for Value {
-    fn from(op: AddOp) -> Self {
-        // use op to construct Value
-        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
-        Value::new(instance)
     }
 }
 
@@ -328,7 +251,7 @@ impl From<AddOp> for Operation {
     fn from(op: AddOp) -> Self {
         Self {
             state: op.state,
-            instance: op.instance,
+            instance: op.operation.instance,
         }
     }
 }
@@ -336,45 +259,27 @@ impl From<AddOp> for Operation {
 #[derive(Clone)]
 pub(crate) struct MulOp {
     name: String,
-    instance: MlirOperation,
-    lhs: Value,
-    rhs: Value,
     state: OperationState,
+    pub operation: Operation,
 }
 
 impl MulOp {
     pub fn new(location: Location, lhs: Value, rhs: Value, result_type: Type) -> Self {
-        unsafe {
-            // FIXME: duplication toy.constant
-            let name = String::from("toy.mul");
-            let mut state = OperationState::new("toy.mul", location);
-            let p_state: *mut MlirOperationState = &mut state.instance;
+        // FIXME: duplication toy.constant
+        let name = String::from("toy.mul");
+        let mut state = OperationState::new("toy.mul", location);
 
-            let operands = vec![lhs.instance, rhs.instance];
-            let p_operands = operands.as_ptr();
-            mlirOperationStateAddOperands(p_state, operands.len() as isize, p_operands);
+        let operands = vec![lhs, rhs];
+        state.add_operands(operands);
+        state.add_results(vec![result_type; 1]);
 
-            let p_results: *const MlirType = &result_type.instance;
-            mlirOperationStateAddResults(p_state, 1, p_results);
+        let operation = Operation::new(state.clone());
 
-            let instance = mlirOperationCreate(p_state);
-
-            Self {
-                name,
-                instance,
-                lhs,
-                rhs,
-                state,
-            }
+        Self {
+            name,
+            state,
+            operation,
         }
-    }
-}
-
-impl From<MulOp> for Value {
-    fn from(op: MulOp) -> Self {
-        // use op to construct Value
-        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
-        Value::new(instance)
     }
 }
 
@@ -382,7 +287,7 @@ impl From<MulOp> for Operation {
     fn from(op: MulOp) -> Self {
         Self {
             state: op.state,
-            instance: op.instance,
+            instance: op.operation.instance,
         }
     }
 }
@@ -390,40 +295,23 @@ impl From<MulOp> for Operation {
 #[derive(Clone)]
 pub(crate) struct PrintOp {
     name: String,
-    instance: MlirOperation,
-    input: Value,
     state: OperationState,
+    pub operation: Operation,
 }
 
 impl PrintOp {
     pub fn new(location: Location, input: Value) -> Self {
-        unsafe {
-            // FIXME: duplication toy.constant
-            let name = String::from("toy.print");
-            let mut state = OperationState::new("toy.print", location);
-            let p_state: *mut MlirOperationState = &mut state.instance;
+        let name = String::from("toy.print");
+        let mut state = OperationState::new("toy.print", location);
 
-            // TODO: let extract to builder
-            let p_operands: *const MlirValue = &input.instance;
-            mlirOperationStateAddOperands(p_state, 1, p_operands);
+        state.add_operands(vec![input; 1]);
+        let operation = Operation::new(state.clone());
 
-            let instance = mlirOperationCreate(p_state);
-
-            Self {
-                name,
-                instance,
-                input,
-                state,
-            }
+        Self {
+            name,
+            state,
+            operation,
         }
-    }
-}
-
-impl From<PrintOp> for Value {
-    fn from(op: PrintOp) -> Self {
-        // use op to construct Value
-        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
-        Value::new(instance)
     }
 }
 
@@ -431,7 +319,7 @@ impl From<PrintOp> for Operation {
     fn from(op: PrintOp) -> Self {
         Self {
             state: op.state,
-            instance: op.instance,
+            instance: op.operation.instance,
         }
     }
 }
@@ -450,7 +338,7 @@ mod tests {
         // Need to make it mutable
         let dialect = ToyDialect::new(&context);
         context.load_dialect(Box::new(dialect));
-        let location = Location::new(&context);
+        let location = Location::new(Rc::clone(&context));
         let mut constant = ConstantOp::new(location);
 
         let op_builder = OpBuilder::new(None, 0, context);

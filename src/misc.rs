@@ -2,8 +2,9 @@ use std::ffi::CString;
 
 use crate::context::Context;
 use mlir_sys::{
-    mlirAttributeGetContext, mlirIdentifierGet, mlirNamedAttributeGet, mlirNoneTypeGet,
-    mlirStringRefCreateFromCString, MlirAttribute, MlirNamedAttribute, MlirType, MlirValue,
+    mlirAttributeGetContext, mlirFlatSymbolRefAttrGet, mlirIdentifierGet, mlirNamedAttributeGet,
+    mlirNoneTypeGet, mlirStringRefCreateFromCString, MlirAttribute, MlirNamedAttribute, MlirType,
+    MlirValue,
 };
 
 #[derive(Clone)]
@@ -61,6 +62,7 @@ impl NamedAttribute {
         let c_name = CString::new(name.clone()).unwrap();
         unsafe {
             let mlir_context = mlirAttributeGetContext(attr.instance);
+
             let id = mlirIdentifierGet(
                 mlir_context,
                 mlirStringRefCreateFromCString(c_name.as_ptr()),
@@ -73,5 +75,18 @@ impl NamedAttribute {
                 instance,
             }
         }
+    }
+}
+impl Attribute {
+    pub fn new_flat_symbol_ref(context: &Context, symbol: &str) -> Attribute {
+        let symbol = CString::new(symbol).unwrap();
+        let instance = unsafe {
+            mlirFlatSymbolRefAttrGet(
+                context.instance,
+                mlirStringRefCreateFromCString(symbol.as_ptr()),
+            )
+        };
+
+        Self { instance }
     }
 }

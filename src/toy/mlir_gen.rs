@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use mlir_sys::{mlirBlockGetArgument, mlirValueDump};
+use mlir_sys::mlirBlockGetArgument;
 
 use crate::context::Context;
 use crate::location::Location;
@@ -29,7 +29,7 @@ pub struct MLIRGen {
 impl<'ctx> MLIRGen {
     pub fn new(context: Rc<Context>) -> Self {
         Self {
-            module: ModuleOp::new(Location::new(&*context)),
+            module: ModuleOp::new(Location::new(Rc::clone(&context))),
             symbol_table: HashMap::new(),
             context: Rc::clone(&context),
             builder: OpBuilder::new(Option::None, 0, Rc::clone(&context)),
@@ -37,7 +37,7 @@ impl<'ctx> MLIRGen {
     }
     // TODO: pass parsed result
     pub fn mlir_gen(&mut self, module_ast: Module) -> ModuleOp {
-        self.module = ModuleOp::new(Location::new(&self.context));
+        self.module = ModuleOp::new(Location::new(Rc::clone(&self.context)));
 
         // TODO: implement Iterator for Module?
         for f in module_ast.functions {
@@ -86,7 +86,7 @@ impl<'ctx> MLIRGen {
 
     fn mlir_gen_prototype(&mut self, prototype_ast: Prototype) -> FuncOp {
         // FIXME: construct location from AST location
-        let location = Location::new(&self.context);
+        let location = Location::new(Rc::clone(&self.context));
         let arg_types = vec![self.get_type(Vec::new()); prototype_ast.args.len()];
         let func_type = self.builder.get_function_type(arg_types, Vec::new());
 
@@ -139,20 +139,20 @@ impl<'ctx> MLIRGen {
                 let data_attr: Attribute =
                     self.builder.get_dense_elements_attr(data_ty.clone(), data);
                 // TODO: a separate builder for constructing a type?
-                let mut op = ConstantOp::new(Location::new(&self.context));
+                let mut op = ConstantOp::new(Location::new(Rc::clone(&self.context)));
                 op.with_result(data_ty).with_attribute(data_attr).build();
                 self.builder.insert(Operation::from(op.clone()));
                 Ok(Value::from(op.operation))
             }
             Number(num) => {
-                let location = Location::new(&self.context);
+                let location = Location::new(Rc::clone(&self.context));
                 let mut op = ConstantOp::new(location);
                 op.with_value(num);
                 self.builder.insert(Operation::from(op.clone()));
                 Ok(Value::from(op.operation))
             }
             Call { fn_name, args } => {
-                let location = Location::new(&self.context);
+                let location = Location::new(Rc::clone(&self.context));
                 let mut operands: Vec<Value> = Vec::new();
                 for arg in &args {
                     let arg = self.mlir_gen_expression(arg.clone()).unwrap();
@@ -169,7 +169,7 @@ impl<'ctx> MLIRGen {
                             .get_unranked_tensor_type(self.builder.get_f64_type()),
                     );
                     self.builder.insert(Operation::from(op.clone()));
-                    let value = Value::from(op);
+                    let value = Value::from(op.operation);
 
                     return Ok(value);
                     // return Ok(Value::from(op));
@@ -180,19 +180,18 @@ impl<'ctx> MLIRGen {
                     .get_unranked_tensor_type(self.builder.get_f64_type());
                 let op = GenericCallOp::new(location, fn_name, operands, result_type);
                 self.builder.insert(Operation::from(op.clone()));
-                let value = Value::from(op);
-                unsafe { mlirValueDump(value.instance) };
+                let value = Value::from(op.operation);
                 Ok(value)
             }
             Return {
                 location: _,
                 expression,
             } => {
-                let location = Location::new(&self.context);
+                let location = Location::new(Rc::clone(&self.context));
                 let value = self.mlir_gen_expression(*expression).unwrap();
                 let op = ReturnOp::new(location, value);
                 self.builder.insert(Operation::from(op.clone()));
-                Ok(Value::from(op))
+                Ok(Value::from(op.operation))
             }
 
             Binary { op, left, right } => {
@@ -201,17 +200,17 @@ impl<'ctx> MLIRGen {
                 let result_type = self
                     .builder
                     .get_unranked_tensor_type(self.builder.get_f64_type());
-                let location = Location::new(&self.context);
+                let location = Location::new(Rc::clone(&self.context));
                 match op {
                     '+' => {
                         let op = AddOp::new(location, lhs, rhs);
                         self.builder.insert(Operation::from(op.clone()));
-                        Ok(Value::from(op))
+                        Ok(Value::from(op.operation))
                     }
                     '*' => {
                         let op = MulOp::new(location, lhs, rhs, result_type);
                         self.builder.insert(Operation::from(op.clone()));
-                        Ok(Value::from(op))
+                        Ok(Value::from(op.operation))
                     }
                     _ => Err("Invalid binary operation"),
                 }
@@ -221,11 +220,11 @@ impl<'ctx> MLIRGen {
                 location: _,
                 expression,
             } => {
-                let location = Location::new(&self.context);
+                let location = Location::new(Rc::clone(&self.context));
                 let value = self.mlir_gen_expression(*expression).unwrap();
                 let op = PrintOp::new(location, value);
                 self.builder.insert(Operation::from(op.clone()));
-                Ok(Value::from(op))
+                Ok(Value::from(op.operation))
             }
             _ => {
                 panic!("Unknown expression");
