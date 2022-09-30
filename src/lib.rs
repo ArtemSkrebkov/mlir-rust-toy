@@ -41,7 +41,7 @@ mod tests {
 
     #[test]
     fn generate_mlir_for_empty_ast() {
-        let filename = "ast_empty.toy".to_string();
+        let filename = "testdata/ast_empty.toy".to_string();
         if filename.is_empty() {
             panic!("Cannot find file to read");
         }
@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn generate_mlir_for_ast_tensor() {
-        let filename = "ast_tensor.toy".to_string();
+        let filename = "testdata/ast_tensor.toy".to_string();
         if filename.is_empty() {
             panic!("Cannot find file to read");
         }
@@ -90,7 +90,6 @@ mod tests {
             .parse_module()
             .unwrap();
         let module = MLIRGen::new(Rc::clone(&context)).mlir_gen(module);
-        println!("Dump:");
         module.dump();
         assert!(!module.block.operations.is_empty());
     }
