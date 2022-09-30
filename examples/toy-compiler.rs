@@ -4,17 +4,16 @@ use rsml::toy;
 use rsml::toy::mlir_gen::MLIRGen;
 use rsml::toy::toy_dialect::ToyDialect;
 use std::collections::HashMap;
-use std::env;
 use std::rc::Rc;
 
-/// Simple program to greet a person
+/// a compiler for a language called Toy
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
     /// path to a file to process
     #[clap(short, long, value_parser)]
     filename: String,
-    /// Name of the person to greet
+    /// Output of compiler. Possible values: ast, mlir
     #[clap(short, long, value_parser)]
     emit: String,
 }

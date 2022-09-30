@@ -9,7 +9,6 @@ pub mod toy;
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
     use std::collections::HashMap;
     use std::rc::Rc;
 
@@ -32,7 +31,7 @@ mod tests {
 
     #[test]
     fn load_dialect() {
-        let mut context = Context::default();
+        let context = Context::default();
         let dialect = ToyDialect::new(&context);
         context.load_dialect(Box::new(dialect));
 

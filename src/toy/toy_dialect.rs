@@ -1,15 +1,10 @@
-use mlir_sys::{
-    mlirFlatSymbolRefAttrGet, mlirIdentifierGet, mlirLocationGetContext, mlirNamedAttributeGet,
-    mlirOperationCreate, mlirOperationGetResult, mlirOperationStateAddAttributes,
-    mlirOperationStateAddOperands, mlirOperationStateAddResults, mlirStringRefCreateFromCString,
-    MlirDialectHandle, MlirNamedAttribute, MlirOperation, MlirOperationState, MlirType, MlirValue,
-};
+use mlir_sys::MlirDialectHandle;
 
 use crate::context::Context;
 use crate::dialect::Dialect;
 use crate::location::Location;
 use crate::misc::{Attribute, NamedAttribute, Type, Value};
-use crate::operation::{self, Operation, OperationState};
+use crate::operation::{Operation, OperationState};
 use crate::toy;
 
 use std::ffi::CString;
@@ -151,7 +146,6 @@ pub struct GenericCallOp {
     pub operation: Operation,
 }
 
-// TODO: implementation looks the same to ConstantOp, besides the name
 impl GenericCallOp {
     pub fn new(
         location: Location,
@@ -228,14 +222,14 @@ pub(crate) struct AddOp {
 }
 
 impl AddOp {
-    pub fn new(location: Location, lhs: Value, rhs: Value) -> Self {
+    pub fn new(location: Location, lhs: Value, rhs: Value, result_type: Type) -> Self {
         let name = String::from("toy.add");
         let mut state = OperationState::new("toy.add", location);
 
         let operands = vec![lhs, rhs];
         state.add_operands(operands);
 
-        // state.add_results(vec![result_type; 1]);
+        state.add_results(vec![result_type; 1]);
 
         let operation = Operation::new(state.clone());
 
@@ -265,7 +259,6 @@ pub(crate) struct MulOp {
 
 impl MulOp {
     pub fn new(location: Location, lhs: Value, rhs: Value, result_type: Type) -> Self {
-        // FIXME: duplication toy.constant
         let name = String::from("toy.mul");
         let mut state = OperationState::new("toy.mul", location);
 
@@ -335,7 +328,6 @@ mod tests {
     #[test]
     fn create_constant() {
         let context = Rc::new(Context::default());
-        // Need to make it mutable
         let dialect = ToyDialect::new(&context);
         context.load_dialect(Box::new(dialect));
         let location = Location::new(Rc::clone(&context));

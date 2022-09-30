@@ -35,7 +35,7 @@ impl<'ctx> MLIRGen {
             builder: OpBuilder::new(Option::None, 0, Rc::clone(&context)),
         }
     }
-    // TODO: pass parsed result
+
     pub fn mlir_gen(&mut self, module_ast: Module) -> ModuleOp {
         self.module = ModuleOp::new(Location::new(Rc::clone(&self.context)));
 
@@ -43,22 +43,16 @@ impl<'ctx> MLIRGen {
         for f in module_ast.functions {
             let func = self.mlir_gen_function(f);
             self.module.push_back(Box::new(Operation::from(func)));
-            // add func into self.module
         }
 
         self.module.clone()
     }
 
     fn mlir_gen_function(&mut self, function_ast: Function) -> FuncOp {
-        // varScopeTable
-        // let var_scope: HashMap<&str, Value> = HashMap::new();
         let function: FuncOp = self.mlir_gen_prototype(function_ast.prototype.clone());
 
         let entry_block = function.block.clone();
-        // TODO: getter for prototype
         let proto_args = function_ast.prototype.args.clone();
-        // FIXME: just for the sake of adding something into the table
-        // need to review how it is done in original Toy tutorial
         let mut pos = 0;
         for arg in proto_args {
             unsafe {
@@ -68,29 +62,20 @@ impl<'ctx> MLIRGen {
             }
         }
         // TODO: declare all the function arguments in the symbol table
-        // TODO: implement builder method
-        // self.builder.set_insertion_point_to_start(entry_block);
         self.builder
             .set_insertion_point(Rc::clone(&function.block), 0);
-        //
-        // mlirBlockInsertOwnedOperationAfter(function.block.instance, reference, operation)
-        // mlirOperationGetBlock(op)
 
-        self.mlir_gen_expression(function_ast.body.unwrap());
-        // function.erase();
-
-        // TODO: handle return op
+        let _ = self.mlir_gen_expression(function_ast.body.unwrap());
 
         function
     }
 
     fn mlir_gen_prototype(&mut self, prototype_ast: Prototype) -> FuncOp {
-        // FIXME: construct location from AST location
+        // TODO: construct location from AST location
         let location = Location::new(Rc::clone(&self.context));
         let arg_types = vec![self.get_type(Vec::new()); prototype_ast.args.len()];
         let func_type = self.builder.get_function_type(arg_types, Vec::new());
 
-        // TODO: make it builder
         FuncOp::new(location, &prototype_ast.name, func_type)
     }
 
@@ -125,20 +110,19 @@ impl<'ctx> MLIRGen {
                 // extract variable from symbol table
             }
             Tensor {
-                location,
-                values,
+                location: _,
+                values: _, // read by collect_data method
                 dims,
             } => {
                 let size = dims.iter().product();
                 let mut data: Vec<f64> = Vec::new();
                 data.reserve(size);
                 self.collect_data(clone_expr, &mut data);
-                // TODO: contruct ConstanOp with array
+
                 let elem_ty = self.builder.get_f64_type();
                 let data_ty = self.builder.get_ranked_tensor_type(dims, elem_ty);
                 let data_attr: Attribute =
                     self.builder.get_dense_elements_attr(data_ty.clone(), data);
-                // TODO: a separate builder for constructing a type?
                 let mut op = ConstantOp::new(Location::new(Rc::clone(&self.context)));
                 op.with_result(data_ty).with_attribute(data_attr).build();
                 self.builder.insert(Operation::from(op.clone()));
@@ -172,7 +156,6 @@ impl<'ctx> MLIRGen {
                     let value = Value::from(op.operation);
 
                     return Ok(value);
-                    // return Ok(Value::from(op));
                 }
 
                 let result_type = self
@@ -203,7 +186,7 @@ impl<'ctx> MLIRGen {
                 let location = Location::new(Rc::clone(&self.context));
                 match op {
                     '+' => {
-                        let op = AddOp::new(location, lhs, rhs);
+                        let op = AddOp::new(location, lhs, rhs, result_type);
                         self.builder.insert(Operation::from(op.clone()));
                         Ok(Value::from(op.operation))
                     }
@@ -225,9 +208,6 @@ impl<'ctx> MLIRGen {
                 let op = PrintOp::new(location, value);
                 self.builder.insert(Operation::from(op.clone()));
                 Ok(Value::from(op.operation))
-            }
-            _ => {
-                panic!("Unknown expression");
             }
         }
     }

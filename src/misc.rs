@@ -12,13 +12,6 @@ pub struct Type {
     pub(crate) instance: MlirType,
 }
 
-impl Type {
-    fn new(context: &Context) -> Self {
-        let instance = unsafe { mlirNoneTypeGet(context.instance) };
-        Self { instance }
-    }
-}
-
 impl From<MlirType> for Type {
     fn from(instance: MlirType) -> Self {
         Self { instance }
@@ -42,8 +35,7 @@ pub struct Value {
 }
 
 impl Value {
-    // TODO: make it available only for crate but not for user
-    pub fn new(instance: MlirValue) -> Value {
+    pub(crate) fn new(instance: MlirValue) -> Value {
         Self { instance }
     }
 }

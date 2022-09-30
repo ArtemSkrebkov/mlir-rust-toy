@@ -1,14 +1,9 @@
-use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::env;
-use std::io::{self, Write};
 use std::iter::Peekable;
 use std::ops::DerefMut;
 use std::str::Chars;
 
 use crate::toy::parser::Token::*;
-
-const ANONYMOUS_FUNCTION_NAME: &str = "anonymous";
 
 // ======================================================================================
 // LEXER ================================================================================
