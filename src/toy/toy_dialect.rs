@@ -317,6 +317,38 @@ impl From<PrintOp> for Operation {
     }
 }
 
+#[derive(Clone)]
+pub struct ReshapeOp {
+    name: String,
+    state: OperationState,
+    pub operation: Operation,
+}
+
+impl ReshapeOp {
+    pub fn new(location: Location, var_type: Type, input: Value) -> Self {
+        let name = String::from("toy.reshape");
+        let mut state = OperationState::new("toy.reshape", location);
+        state.add_operands(vec![input; 1]);
+        state.add_results(vec![var_type; 1]);
+        let operation = Operation::new(state.clone());
+
+        Self {
+            name,
+            state,
+            operation,
+        }
+    }
+}
+
+impl From<ReshapeOp> for Operation {
+    fn from(op: ReshapeOp) -> Self {
+        Self {
+            state: op.state,
+            instance: op.operation.instance,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;

@@ -96,7 +96,7 @@ pub trait OneRegion {
 
 #[derive(Clone)]
 pub struct ModuleOp {
-    instance: MlirModule,
+    pub(crate) instance: MlirModule,
     // state: OperationState,
     // TODO: make it private? better to have accessor methods
     pub(crate) block: Block,

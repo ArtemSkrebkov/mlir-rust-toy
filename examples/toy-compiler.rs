@@ -1,5 +1,6 @@
 use clap::Parser;
 use rsml::context::Context;
+use rsml::pass_manager::PassManager;
 use rsml::toy;
 use rsml::toy::mlir_gen::MLIRGen;
 use rsml::toy::toy_dialect::ToyDialect;
@@ -16,6 +17,9 @@ struct Args {
     /// Output of compiler. Possible values: ast, mlir
     #[clap(short, long, value_parser)]
     emit: String,
+    /// Enable optimizations
+    #[clap(short, long, value_parser, default_value_t = false)]
+    opt: bool,
 }
 
 fn main() {
@@ -43,6 +47,12 @@ fn main() {
         let dialect = ToyDialect::new(&context);
         context.load_dialect(Box::new(dialect));
         let module = MLIRGen::new(Rc::clone(&context)).mlir_gen(module);
+        if args.opt {
+            let pass_manager = PassManager::new(Rc::clone(&context));
+            let pass = PassManager::create_canonicalizer_pass();
+            pass_manager.add_nested_pass(pass, "builtin.func");
+            pass_manager.run(&module);
+        }
         module.dump();
     }
 }
