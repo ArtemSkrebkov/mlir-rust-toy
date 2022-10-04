@@ -8,8 +8,8 @@ use std::str;
 
 fn main() {
     // Tell cargo to look for shared libraries in the specified directory
-    // FIXME: use relative path
-    println!("cargo:rustc-link-search=/home/artemy/workspace/repos/rsml/cpp/toy/build/lib");
+    // TODO: better to have it installed somewhere and configured
+    println!("cargo:rustc-link-search=./cpp/toy/build/lib");
 
     // Tell cargo to tell rustc to link the system bzip2
     // shared library.
@@ -26,10 +26,7 @@ fn main() {
         // The input header we would like to generate
         // bindings for.
         .header("wrapper.h")
-        .clang_arg(format!(
-            "-I{}",
-            "/home/artemy/workspace/repos/rsml/cpp/toy/include/",
-        ))
+        .clang_arg(format!("-I{}", "./cpp/toy/include/",))
         .clang_arg(format!("-I{}", llvm_config("--includedir").unwrap()))
         .allowlist_function(".*toy.*")
         // Tell cargo to invalidate the built crate whenever any of the
