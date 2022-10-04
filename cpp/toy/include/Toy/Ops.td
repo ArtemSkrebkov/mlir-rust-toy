@@ -187,6 +187,7 @@ def ReshapeOp : Toy_Op<"reshape"> {
   let assemblyFormat = [{
     `(` $input `:` type($input) `)` attr-dict `to` type(results)
   }];
+  let hasCanonicalizer = 1;
 }
 
 def ReturnOp : Toy_Op<"return", [NoSideEffect, HasParent<"FuncOp">,
@@ -227,7 +228,7 @@ def ReturnOp : Toy_Op<"return", [NoSideEffect, HasParent<"FuncOp">,
   let verifier = [{ return ::verify(*this); }];
 }
 
-def TransposeOp : Toy_Op<"transpose"> {
+def TransposeOp : Toy_Op<"transpose", [NoSideEffect]> {
   let summary = "transpose operation";
 
   let arguments = (ins F64Tensor:$input);
@@ -242,6 +243,7 @@ def TransposeOp : Toy_Op<"transpose"> {
     OpBuilder<(ins "Value":$input)>
   ];
 
+  let hasCanonicalizer = 1;
   // Invoke a static verify method to verify this transpose operation.
   let verifier = [{ return ::verify(*this); }];
 }
