@@ -38,7 +38,7 @@ impl PassManager {
     }
 
     pub fn run(&self, module: &crate::operation::ModuleOp) {
-        // check returned value
+        // TODO: check returned value
         unsafe { mlirPassManagerRun(self.instance, module.instance) };
     }
 }

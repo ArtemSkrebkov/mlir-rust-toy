@@ -19,6 +19,8 @@ use crate::toy::toy_dialect::{
     AddOp, ConstantOp, GenericCallOp, MulOp, PrintOp, ReturnOp, TransposeOp,
 };
 
+use super::toy_dialect::ReshapeOp;
+
 pub struct MLIRGen {
     module: ModuleOp,
     symbol_table: HashMap<String, Value>,
@@ -94,9 +96,19 @@ impl<'ctx> MLIRGen {
                 }
                 Err("ExprList not implemented")
             }
-            VarDecl { name, value } => {
-                let value = self.mlir_gen_expression(*value).unwrap();
-                // TODO: reshape op
+            VarDecl {
+                name,
+                var_type,
+                value,
+            } => {
+                let mut value = self.mlir_gen_expression(*value).unwrap();
+                if !var_type.shape.is_empty() {
+                    let location = Location::new(Rc::clone(&self.context));
+                    let var_type = self.get_type(var_type.shape);
+                    let op = ReshapeOp::new(location, var_type, value.clone());
+                    self.builder.insert(Operation::from(op.clone()));
+                    value = Value::from(op.operation);
+                }
                 // declare variable in the symbol table
                 self.declare(name, value.clone());
                 Ok(value)

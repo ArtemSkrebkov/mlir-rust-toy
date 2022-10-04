@@ -35,8 +35,9 @@ pub enum Token {
     Print,
 }
 
+#[derive(Debug, Clone)]
 pub struct VarType {
-    shape: Vec<usize>,
+    pub shape: Vec<usize>,
 }
 
 impl VarType {
@@ -284,6 +285,7 @@ pub enum Expr {
 
     VarDecl {
         name: String,
+        var_type: VarType,
         value: Box<Expr>,
     },
 
@@ -702,7 +704,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parses a var..in expression.
+    /// Parses a var expression.
     fn parse_var_expr(&mut self) -> Result<Expr, &'static str> {
         // eat 'var' token
         self.advance()?;
@@ -714,7 +716,7 @@ impl<'a> Parser<'a> {
 
         self.advance()?;
 
-        let _var_type = match self.curr() {
+        let var_type = match self.curr() {
             AngleLeft => self.parse_var_type()?,
             _ => VarType::new(),
         };
@@ -739,6 +741,7 @@ impl<'a> Parser<'a> {
 
         Ok(Expr::VarDecl {
             name,
+            var_type,
             value: Box::new(initializer.unwrap()),
         })
     }

@@ -128,4 +128,38 @@ mod tests {
         println!("");
         assert!(!module.block.operations.is_empty());
     }
+
+    #[test]
+    fn generate_mlir_for_reshape_opt() {
+        let filename = "testdata/reshape_opt.toy".to_string();
+        if filename.is_empty() {
+            panic!("Cannot find file to read");
+        }
+        let content = std::fs::read_to_string(filename).unwrap();
+        let mut prec = HashMap::with_capacity(6);
+
+        prec.insert('=', 2);
+        prec.insert('<', 10);
+        prec.insert('+', 20);
+        prec.insert('-', 20);
+        prec.insert('*', 40);
+        prec.insert('/', 40);
+
+        let context = Rc::new(Context::default());
+        let dialect = ToyDialect::new(&context);
+        context.load_dialect(Box::new(dialect));
+        let module = parser::Parser::new(content, &mut prec)
+            .parse_module()
+            .unwrap();
+        let module = MLIRGen::new(Rc::clone(&context)).mlir_gen(module);
+
+        let pass_manager = PassManager::new(Rc::clone(&context));
+        let pass = PassManager::create_canonicalizer_pass();
+        pass_manager.add_nested_pass(pass, "builtin.func");
+        pass_manager.run(&module);
+
+        module.dump();
+        println!("");
+        assert!(!module.block.operations.is_empty());
+    }
 }
