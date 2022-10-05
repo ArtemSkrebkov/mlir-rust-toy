@@ -20,6 +20,8 @@ mod tests {
     use crate::toy::parser;
     use crate::toy::toy_dialect::ToyDialect;
 
+    use test_case::test_case;
+
     #[test]
     fn create_context() {
         let _context = Context::default();
@@ -41,63 +43,13 @@ mod tests {
         context.load_dialect(Box::new(std_dialect));
     }
 
-    #[test]
-    fn generate_mlir_for_empty_ast() {
-        let filename = "testdata/ast_empty.toy".to_string();
-        if filename.is_empty() {
-            panic!("Cannot find file to read");
-        }
-        let content = std::fs::read_to_string(filename).unwrap();
-        let mut prec = HashMap::with_capacity(6);
-
-        prec.insert('=', 2);
-        prec.insert('<', 10);
-        prec.insert('+', 20);
-        prec.insert('-', 20);
-        prec.insert('*', 40);
-        prec.insert('/', 40);
-
-        let context = Rc::new(Context::default());
-        let dialect = ToyDialect::new(&context);
-        context.load_dialect(Box::new(dialect));
-
-        let module = parser::Parser::new(content, &mut prec)
-            .parse_module()
-            .unwrap();
-        let module = MLIRGen::new(Rc::clone(&context)).mlir_gen(module);
-        assert!(!module.block.operations.is_empty());
-    }
-
-    #[test]
-    fn generate_mlir_for_ast_tensor() {
-        let filename = "testdata/ast_tensor.toy".to_string();
-        if filename.is_empty() {
-            panic!("Cannot find file to read");
-        }
-        let content = std::fs::read_to_string(filename).unwrap();
-        let mut prec = HashMap::with_capacity(6);
-
-        prec.insert('=', 2);
-        prec.insert('<', 10);
-        prec.insert('+', 20);
-        prec.insert('-', 20);
-        prec.insert('*', 40);
-        prec.insert('/', 40);
-
-        let context = Rc::new(Context::default());
-        let dialect = ToyDialect::new(&context);
-        context.load_dialect(Box::new(dialect));
-        let module = parser::Parser::new(content, &mut prec)
-            .parse_module()
-            .unwrap();
-        let module = MLIRGen::new(Rc::clone(&context)).mlir_gen(module);
-        module.dump();
-        assert!(!module.block.operations.is_empty());
-    }
-
-    #[test]
-    fn generate_mlir_for_transpose_transpose_opt() {
-        let filename = "testdata/transpose_transpose_opt.toy".to_string();
+    #[test_case("ast_empty", false; "when generate MLIR for empty main")]
+    #[test_case("ast_tensor", false; "when generate MLIR with tensors")]
+    #[test_case("ast", false; "when generate MLIR for complex file")]
+    #[test_case("reshape_opt", true; "when optimizing reshape")]
+    #[test_case("transpose_transpose_opt", true; "when optimizing transpose")]
+    fn generate_mlir(filename: &str, is_opt: bool) {
+        let filename = format!("testdata/{}.toy", filename);
         if filename.is_empty() {
             panic!("Cannot find file to read");
         }
@@ -119,44 +71,12 @@ mod tests {
             .unwrap();
         let module = MLIRGen::new(Rc::clone(&context)).mlir_gen(module);
 
-        let pass_manager = PassManager::new(Rc::clone(&context));
-        let pass = PassManager::create_canonicalizer_pass();
-        pass_manager.add_nested_pass(pass, "builtin.func");
-        pass_manager.run(&module);
-
-        module.dump();
-        println!("");
-        assert!(!module.block.operations.is_empty());
-    }
-
-    #[test]
-    fn generate_mlir_for_reshape_opt() {
-        let filename = "testdata/reshape_opt.toy".to_string();
-        if filename.is_empty() {
-            panic!("Cannot find file to read");
+        if is_opt {
+            let pass_manager = PassManager::new(Rc::clone(&context));
+            let pass = PassManager::create_canonicalizer_pass();
+            pass_manager.add_nested_pass(pass, "builtin.func");
+            pass_manager.run(&module);
         }
-        let content = std::fs::read_to_string(filename).unwrap();
-        let mut prec = HashMap::with_capacity(6);
-
-        prec.insert('=', 2);
-        prec.insert('<', 10);
-        prec.insert('+', 20);
-        prec.insert('-', 20);
-        prec.insert('*', 40);
-        prec.insert('/', 40);
-
-        let context = Rc::new(Context::default());
-        let dialect = ToyDialect::new(&context);
-        context.load_dialect(Box::new(dialect));
-        let module = parser::Parser::new(content, &mut prec)
-            .parse_module()
-            .unwrap();
-        let module = MLIRGen::new(Rc::clone(&context)).mlir_gen(module);
-
-        let pass_manager = PassManager::new(Rc::clone(&context));
-        let pass = PassManager::create_canonicalizer_pass();
-        pass_manager.add_nested_pass(pass, "builtin.func");
-        pass_manager.run(&module);
 
         module.dump();
         println!("");
