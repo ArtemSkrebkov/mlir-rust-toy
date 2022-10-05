@@ -15,11 +15,10 @@ use crate::toy::parser::Expr::{
 
 use crate::toy::parser::{Expr, Function, Module, Prototype};
 
-use crate::toy::toy_dialect::{
-    AddOp, ConstantOp, GenericCallOp, MulOp, PrintOp, ReturnOp, TransposeOp,
+use super::toy_dialect::{
+    AddOpBuilder, ConstantOpBuilder, GenericCallOpBuilder, MulOpBuilder, PrintOpBuilder,
+    ReshapeOpBuilder, ReturnOpBuilder, TransposeOpBuilder,
 };
-
-use super::toy_dialect::ReshapeOp;
 
 pub struct MLIRGen {
     module: ModuleOp,
@@ -63,11 +62,12 @@ impl<'ctx> MLIRGen {
                 pos += 1;
             }
         }
-        // TODO: declare all the function arguments in the symbol table
         self.builder
             .set_insertion_point(Rc::clone(&function.block), 0);
 
         let _ = self.mlir_gen_expression(function_ast.body.unwrap());
+
+        println!("block size {}", entry_block.operations.len());
 
         function
     }
@@ -105,9 +105,12 @@ impl<'ctx> MLIRGen {
                 if !var_type.shape.is_empty() {
                     let location = Location::new(Rc::clone(&self.context));
                     let var_type = self.get_type(var_type.shape);
-                    let op = ReshapeOp::new(location, var_type, value.clone());
-                    self.builder.insert(Operation::from(op.clone()));
-                    value = Value::from(op.operation);
+                    let op = ReshapeOpBuilder::new(location)
+                        .result(var_type)
+                        .input(value.clone())
+                        .build();
+                    self.builder.insert(op.clone());
+                    value = Value::from(op);
                 }
                 // declare variable in the symbol table
                 self.declare(name, value.clone());
@@ -135,14 +138,15 @@ impl<'ctx> MLIRGen {
                 let data_ty = self.builder.get_ranked_tensor_type(dims, elem_ty);
                 let data_attr: Attribute =
                     self.builder.get_dense_elements_attr(data_ty.clone(), data);
-                let mut op = ConstantOp::new(Location::new(Rc::clone(&self.context)));
-                op.with_result(data_ty).with_attribute(data_attr).build();
-                self.builder.insert(Operation::from(op.clone()));
-                Ok(Value::from(op.operation))
+                let mut op = ConstantOpBuilder::new(Location::new(Rc::clone(&self.context)))
+                    .result(data_ty)
+                    .attribute(data_attr)
+                    .build();
+                self.builder.insert(op.clone());
+                Ok(Value::from(op))
             }
             Number(num) => {
                 let location = Location::new(Rc::clone(&self.context));
-                let mut op = ConstantOp::new(location);
                 // FIXME: consider constant as a tensor with shape 1
                 // otherwise, getting a conversion error
                 let elem_ty = self.builder.get_f64_type();
@@ -150,9 +154,14 @@ impl<'ctx> MLIRGen {
                 let elem_attr: Attribute = self
                     .builder
                     .get_dense_elements_attr(elem_ty.clone(), vec![num]);
-                op.with_result(elem_ty).with_attribute(elem_attr).build();
-                self.builder.insert(Operation::from(op.clone()));
-                Ok(Value::from(op.operation))
+
+                let op = ConstantOpBuilder::new(location)
+                    .result(elem_ty)
+                    .attribute(elem_attr)
+                    .build();
+
+                self.builder.insert(op.clone());
+                Ok(Value::from(op))
             }
             Call { fn_name, args } => {
                 let location = Location::new(Rc::clone(&self.context));
@@ -165,14 +174,15 @@ impl<'ctx> MLIRGen {
                     if args.len() != 1 {
                         panic!("MLIR codegen encountered an error: toy.transpose does not accept multiple args");
                     }
-                    let op = TransposeOp::new(
-                        location,
-                        operands[0].clone(),
-                        self.builder
-                            .get_unranked_tensor_type(self.builder.get_f64_type()),
-                    );
-                    self.builder.insert(Operation::from(op.clone()));
-                    let value = Value::from(op.operation);
+                    let op = TransposeOpBuilder::new(location)
+                        .input(operands[0].clone())
+                        .result(
+                            self.builder
+                                .get_unranked_tensor_type(self.builder.get_f64_type()),
+                        )
+                        .build();
+                    self.builder.insert(op.clone());
+                    let value = Value::from(op);
 
                     return Ok(value);
                 }
@@ -180,9 +190,13 @@ impl<'ctx> MLIRGen {
                 let result_type = self
                     .builder
                     .get_unranked_tensor_type(self.builder.get_f64_type());
-                let op = GenericCallOp::new(location, fn_name, operands, result_type);
-                self.builder.insert(Operation::from(op.clone()));
-                let value = Value::from(op.operation);
+                let op = GenericCallOpBuilder::new(location)
+                    .callee(&fn_name)
+                    .operands(operands)
+                    .result(result_type)
+                    .build();
+                self.builder.insert(op.clone());
+                let value = Value::from(op);
                 Ok(value)
             }
             Return {
@@ -191,9 +205,9 @@ impl<'ctx> MLIRGen {
             } => {
                 let location = Location::new(Rc::clone(&self.context));
                 let value = self.mlir_gen_expression(*expression).unwrap();
-                let op = ReturnOp::new(location, value);
-                self.builder.insert(Operation::from(op.clone()));
-                Ok(Value::from(op.operation))
+                let op = ReturnOpBuilder::new(location).input(value).build();
+                self.builder.insert(op.clone());
+                Ok(Value::from(op))
             }
 
             Binary { op, left, right } => {
@@ -205,14 +219,20 @@ impl<'ctx> MLIRGen {
                 let location = Location::new(Rc::clone(&self.context));
                 match op {
                     '+' => {
-                        let op = AddOp::new(location, lhs, rhs, result_type);
-                        self.builder.insert(Operation::from(op.clone()));
-                        Ok(Value::from(op.operation))
+                        let op = AddOpBuilder::new(location)
+                            .operands(lhs, rhs)
+                            .result(result_type)
+                            .build();
+                        self.builder.insert(op.clone());
+                        Ok(Value::from(op))
                     }
                     '*' => {
-                        let op = MulOp::new(location, lhs, rhs, result_type);
-                        self.builder.insert(Operation::from(op.clone()));
-                        Ok(Value::from(op.operation))
+                        let op = MulOpBuilder::new(location)
+                            .operands(lhs, rhs)
+                            .result(result_type)
+                            .build();
+                        self.builder.insert(op.clone());
+                        Ok(Value::from(op))
                     }
                     _ => Err("Invalid binary operation"),
                 }
@@ -224,9 +244,9 @@ impl<'ctx> MLIRGen {
             } => {
                 let location = Location::new(Rc::clone(&self.context));
                 let value = self.mlir_gen_expression(*expression).unwrap();
-                let op = PrintOp::new(location, value);
-                self.builder.insert(Operation::from(op.clone()));
-                Ok(Value::from(op.operation))
+                let op = PrintOpBuilder::new(location).input(value).build();
+                self.builder.insert(op.clone());
+                Ok(Value::from(op))
             }
         }
     }
