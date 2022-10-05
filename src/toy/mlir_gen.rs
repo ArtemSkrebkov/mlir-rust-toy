@@ -143,7 +143,14 @@ impl<'ctx> MLIRGen {
             Number(num) => {
                 let location = Location::new(Rc::clone(&self.context));
                 let mut op = ConstantOp::new(location);
-                op.with_value(num);
+                // FIXME: consider constant as a tensor with shape 1
+                // otherwise, getting a conversion error
+                let elem_ty = self.builder.get_f64_type();
+                let elem_ty = self.builder.get_ranked_tensor_type(vec![1], elem_ty);
+                let elem_attr: Attribute = self
+                    .builder
+                    .get_dense_elements_attr(elem_ty.clone(), vec![num]);
+                op.with_result(elem_ty).with_attribute(elem_attr).build();
                 self.builder.insert(Operation::from(op.clone()));
                 Ok(Value::from(op.operation))
             }

@@ -1,7 +1,7 @@
 use mlir_sys::{
     mlirAttributeGetNull, mlirBlockInsertOwnedOperation, mlirDenseElementsAttrDoubleGet,
-    mlirF64TypeGet, mlirFunctionTypeGet, mlirRankedTensorTypeGet, mlirUnrankedTensorTypeGet,
-    MlirType,
+    mlirF64TypeGet, mlirFloatAttrDoubleGet, mlirFunctionTypeGet, mlirRankedTensorTypeGet,
+    mlirUnrankedTensorTypeGet, MlirType,
 };
 
 use crate::block::Block;
@@ -56,6 +56,16 @@ impl<'ctx> OpBuilder {
                 data_ty.instance,
                 data.len() as isize,
                 data.as_ptr(),
+            ))
+        }
+    }
+
+    pub fn get_float_attr_double(&self, data_ty: Type, data: f64) -> Attribute {
+        unsafe {
+            Attribute::from(mlirFloatAttrDoubleGet(
+                self.context.instance,
+                data_ty.instance,
+                data,
             ))
         }
     }
