@@ -3,4 +3,5 @@ def main() {
   var b<2,1> = a;
   var c<2,1> = b;
   print(c);
+  return;
 }

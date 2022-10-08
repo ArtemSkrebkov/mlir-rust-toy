@@ -9,4 +9,5 @@ def main() {
   var c = multiply_transpose(a, b);
   var d = multiply_transpose(b, a);
   print(d);
+  return;
 }

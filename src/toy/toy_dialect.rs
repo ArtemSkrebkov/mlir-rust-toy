@@ -44,308 +44,216 @@ impl Dialect for ToyDialect {
         self.instance
     }
 }
-#[derive(Clone)]
-pub struct ConstantOp {
-    name: String,
-    location: Location,
+
+pub struct ConstantOpBuilder {
     state: OperationState,
-    // TODO: add accessor?
-    pub operation: Operation,
-    value: f64,
 }
 
-impl ConstantOp {
+impl ConstantOpBuilder {
     pub fn new(location: Location) -> Self {
-        let name = String::from("toy.constant");
         let state = OperationState::new("toy.constant", location.clone());
-        let operation = Operation::new(state.clone());
-
-        Self {
-            name,
-            operation,
-            value: 0.0,
-            state,
-            location,
-        }
+        Self { state }
     }
 
-    pub fn with_value(&mut self, value: f64) -> &mut Self {
-        self.value = value;
-        self
-    }
-
-    pub fn with_result(&mut self, result_type: Type) -> &mut Self {
+    pub fn result(&mut self, result_type: Type) -> &mut Self {
         let results = vec![result_type; 1];
         self.state.add_results(results);
         self
     }
 
-    pub fn with_attribute(&mut self, attr: Attribute) -> &mut Self {
+    pub fn attribute(&mut self, attr: Attribute) -> &mut Self {
         let named_attr = NamedAttribute::new("value", attr);
         self.state.add_attributes(vec![named_attr; 1]);
         self
     }
 
-    pub(crate) fn build(&mut self) -> &mut Self {
-        // FIXME: here we create op one more time despite it was created in new method
-        self.operation = Operation::new(self.state.clone());
+    pub fn build(&mut self) -> Operation {
+        Operation::new(&mut self.state)
+    }
+}
 
+pub struct TransposeOpBuilder {
+    state: OperationState,
+}
+
+impl TransposeOpBuilder {
+    pub fn new(location: Location) -> Self {
+        let state = OperationState::new("toy.transpose", location);
+
+        Self { state }
+    }
+
+    pub fn result(&mut self, result_type: Type) -> &mut Self {
+        let results = vec![result_type; 1];
+        self.state.add_results(results);
         self
     }
-}
 
-impl From<ConstantOp> for Operation {
-    fn from(op: ConstantOp) -> Self {
-        Self {
-            state: op.state,
-            instance: op.operation.instance,
-        }
+    pub fn input(&mut self, input: Value) -> &mut Self {
+        self.state.add_operands(vec![input; 1]);
+        self
+    }
+
+    pub fn build(&mut self) -> Operation {
+        Operation::new(&mut self.state)
     }
 }
 
-#[derive(Clone)]
-pub struct TransposeOp {
-    name: String,
+pub struct GenericCallOpBuilder {
     state: OperationState,
-    pub operation: Operation,
+    location: Location,
 }
 
-// TODO: implementation looks the same to ConstantOp, besides the name
-impl TransposeOp {
-    pub fn new(location: Location, input: Value, result_type: Type) -> Self {
-        let name = String::from("toy.transpose");
-        let mut state = OperationState::new("toy.transpose", location);
+impl GenericCallOpBuilder {
+    pub fn new(location: Location) -> Self {
+        let state = OperationState::new("toy.generic_call", location.clone());
 
-        state.add_results(vec![result_type; 1]);
-        state.add_operands(vec![input; 1]);
-
-        let operation = Operation::new(state.clone());
-
-        Self {
-            name,
-            state,
-            operation,
-        }
+        Self { state, location }
     }
-}
 
-impl From<TransposeOp> for Operation {
-    fn from(op: TransposeOp) -> Self {
-        Self {
-            state: op.state,
-            instance: op.operation.instance,
-        }
+    pub fn operands(&mut self, operands: Vec<Value>) -> &mut Self {
+        self.state.add_operands(operands);
+        self
     }
-}
 
-#[derive(Clone)]
-pub struct GenericCallOp {
-    name: String,
-    callee: String,
-    state: OperationState,
-    pub operation: Operation,
-}
+    pub fn result(&mut self, result_type: Type) -> &mut Self {
+        let results = vec![result_type; 1];
+        self.state.add_results(results);
+        self
+    }
 
-impl GenericCallOp {
-    pub fn new(
-        location: Location,
-        callee: String,
-        operands: Vec<Value>,
-        result_type: Type,
-    ) -> Self {
-        let name = String::from("toy.generic_call");
-        let mut state = OperationState::new("toy.generic_call", location.clone());
-        state.add_operands(operands);
-        state.add_results(vec![result_type; 1]);
-
-        let attr = Attribute::new_flat_symbol_ref(location.context(), &callee);
+    pub fn callee(&mut self, callee: &str) -> &mut Self {
+        let attr = Attribute::new_flat_symbol_ref(self.location.context(), callee);
         let named_attr = NamedAttribute::new("callee", attr);
 
-        state.add_attributes(vec![named_attr; 1]);
-        let operation = Operation::new(state.clone());
+        self.state.add_attributes(vec![named_attr; 1]);
+        self
+    }
 
-        Self {
-            name,
-            state,
-            callee,
-            operation,
-        }
+    pub fn build(&mut self) -> Operation {
+        Operation::new(&mut self.state)
     }
 }
 
-impl From<GenericCallOp> for Operation {
-    fn from(op: GenericCallOp) -> Self {
-        Self {
-            state: op.state,
-            instance: op.operation.instance,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct ReturnOp {
-    name: String,
+pub struct ReturnOpBuilder {
     state: OperationState,
-    pub operation: Operation,
 }
 
-impl ReturnOp {
-    pub fn new(location: Location, input: Value) -> Self {
-        let name = String::from("toy.return");
-        let mut state = OperationState::new("toy.return", location);
-        state.add_operands(vec![input; 1]);
+impl ReturnOpBuilder {
+    pub fn new(location: Location) -> Self {
+        let state = OperationState::new("toy.return", location);
 
-        let operation = Operation::new(state.clone());
+        Self { state }
+    }
 
-        Self {
-            name,
-            state,
-            operation,
-        }
+    pub fn input(&mut self, input: Value) -> &mut Self {
+        self.state.add_operands(vec![input; 1]);
+        self
+    }
+
+    pub fn build(&mut self) -> Operation {
+        Operation::new(&mut self.state)
     }
 }
 
-impl From<ReturnOp> for Operation {
-    fn from(op: ReturnOp) -> Self {
-        Self {
-            state: op.state,
-            instance: op.operation.instance,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct AddOp {
-    name: String,
+pub struct AddOpBuilder {
     state: OperationState,
-    pub operation: Operation,
 }
 
-impl AddOp {
-    pub fn new(location: Location, lhs: Value, rhs: Value, result_type: Type) -> Self {
-        let name = String::from("toy.add");
-        let mut state = OperationState::new("toy.add", location);
+impl AddOpBuilder {
+    pub fn new(location: Location) -> Self {
+        let state = OperationState::new("toy.add", location);
 
-        let operands = vec![lhs, rhs];
-        state.add_operands(operands);
+        Self { state }
+    }
 
-        state.add_results(vec![result_type; 1]);
+    pub fn operands(&mut self, lhs: Value, rhs: Value) -> &mut Self {
+        self.state.add_operands([lhs, rhs].to_vec());
+        self
+    }
 
-        let operation = Operation::new(state.clone());
+    pub fn result(&mut self, result_type: Type) -> &mut Self {
+        let results = vec![result_type; 1];
+        self.state.add_results(results);
+        self
+    }
 
-        Self {
-            name,
-            state,
-            operation,
-        }
+    pub fn build(&mut self) -> Operation {
+        Operation::new(&mut self.state)
     }
 }
 
-impl From<AddOp> for Operation {
-    fn from(op: AddOp) -> Self {
-        Self {
-            state: op.state,
-            instance: op.operation.instance,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct MulOp {
-    name: String,
+pub struct MulOpBuilder {
     state: OperationState,
-    pub operation: Operation,
 }
 
-impl MulOp {
-    pub fn new(location: Location, lhs: Value, rhs: Value, result_type: Type) -> Self {
-        let name = String::from("toy.mul");
-        let mut state = OperationState::new("toy.mul", location);
+impl MulOpBuilder {
+    pub fn new(location: Location) -> Self {
+        let state = OperationState::new("toy.mul", location);
 
-        let operands = vec![lhs, rhs];
-        state.add_operands(operands);
-        state.add_results(vec![result_type; 1]);
+        Self { state }
+    }
 
-        let operation = Operation::new(state.clone());
+    pub fn operands(&mut self, lhs: Value, rhs: Value) -> &mut Self {
+        self.state.add_operands([lhs, rhs].to_vec());
+        self
+    }
 
-        Self {
-            name,
-            state,
-            operation,
-        }
+    pub fn result(&mut self, result_type: Type) -> &mut Self {
+        let results = vec![result_type; 1];
+        self.state.add_results(results);
+        self
+    }
+
+    pub fn build(&mut self) -> Operation {
+        Operation::new(&mut self.state)
     }
 }
 
-impl From<MulOp> for Operation {
-    fn from(op: MulOp) -> Self {
-        Self {
-            state: op.state,
-            instance: op.operation.instance,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct PrintOp {
-    name: String,
+pub struct PrintOpBuilder {
     state: OperationState,
-    pub operation: Operation,
 }
 
-impl PrintOp {
-    pub fn new(location: Location, input: Value) -> Self {
-        let name = String::from("toy.print");
-        let mut state = OperationState::new("toy.print", location);
+impl PrintOpBuilder {
+    pub fn new(location: Location) -> Self {
+        let state = OperationState::new("toy.print", location);
 
-        state.add_operands(vec![input; 1]);
-        let operation = Operation::new(state.clone());
+        Self { state }
+    }
 
-        Self {
-            name,
-            state,
-            operation,
-        }
+    pub fn input(&mut self, input: Value) -> &mut Self {
+        self.state.add_operands(vec![input; 1]);
+        self
+    }
+
+    pub fn build(&mut self) -> Operation {
+        Operation::new(&mut self.state)
     }
 }
 
-impl From<PrintOp> for Operation {
-    fn from(op: PrintOp) -> Self {
-        Self {
-            state: op.state,
-            instance: op.operation.instance,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct ReshapeOp {
-    name: String,
+pub struct ReshapeOpBuilder {
     state: OperationState,
-    pub operation: Operation,
 }
 
-impl ReshapeOp {
-    pub fn new(location: Location, var_type: Type, input: Value) -> Self {
-        let name = String::from("toy.reshape");
-        let mut state = OperationState::new("toy.reshape", location);
-        state.add_operands(vec![input; 1]);
-        state.add_results(vec![var_type; 1]);
-        let operation = Operation::new(state.clone());
+impl ReshapeOpBuilder {
+    pub fn new(location: Location) -> Self {
+        let state = OperationState::new("toy.reshape", location);
 
-        Self {
-            name,
-            state,
-            operation,
-        }
+        Self { state }
     }
-}
+    pub fn input(&mut self, input: Value) -> &mut Self {
+        self.state.add_operands(vec![input; 1]);
+        self
+    }
 
-impl From<ReshapeOp> for Operation {
-    fn from(op: ReshapeOp) -> Self {
-        Self {
-            state: op.state,
-            instance: op.operation.instance,
-        }
+    pub fn result(&mut self, result_type: Type) -> &mut Self {
+        let results = vec![result_type; 1];
+        self.state.add_results(results);
+        self
+    }
+
+    pub fn build(&mut self) -> Operation {
+        Operation::new(&mut self.state)
     }
 }
 
@@ -363,17 +271,15 @@ mod tests {
         let dialect = ToyDialect::new(&context);
         context.load_dialect(Box::new(dialect));
         let location = Location::new(Rc::clone(&context));
-        let mut constant = ConstantOp::new(location);
 
         let op_builder = OpBuilder::new(None, 0, context);
         let result_type = op_builder.get_f64_type();
         let ty = op_builder.get_f64_type();
         let ty = op_builder.get_ranked_tensor_type(vec![3, 1], ty);
         let attr: Attribute = op_builder.get_dense_elements_attr(ty.clone(), vec![1.0, 1.0, 1.0]);
-        constant
-            .with_value(1.0)
-            .with_result(result_type)
-            .with_attribute(attr)
+        let _constant = ConstantOpBuilder::new(location)
+            .result(result_type)
+            .attribute(attr)
             .build();
     }
 }

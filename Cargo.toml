@@ -11,3 +11,6 @@ bindgen = "0.60.1"
 libc = "0.2.132"
 mlir-sys = { git = "https://github.com/ArtemSkrebkov/mlir-sys.git", branch = "main"}
 clap = {version = "3.2.22", features = ["derive"]}
+
+[dev-dependencies]
+test-case = "2.2.2"

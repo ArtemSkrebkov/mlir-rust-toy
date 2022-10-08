@@ -64,15 +64,14 @@ impl OperationState {
 
 #[derive(Clone)]
 pub struct Operation {
-    pub(crate) state: OperationState,
     pub(crate) instance: MlirOperation,
 }
 
 impl Operation {
-    pub fn new(mut state: OperationState) -> Self {
+    pub fn new(state: &mut OperationState) -> Self {
         let p_state: *mut MlirOperationState = &mut state.instance;
         let instance = unsafe { mlirOperationCreate(p_state) };
-        Self { state, instance }
+        Self { instance }
     }
 }
 
@@ -317,7 +316,6 @@ impl FuncOp {
 impl From<FuncOp> for Operation {
     fn from(op: FuncOp) -> Self {
         Self {
-            state: op.state,
             instance: op.instance,
         }
     }
