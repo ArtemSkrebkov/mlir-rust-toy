@@ -28,8 +28,7 @@ fn main() {
         .header("wrapper.h")
         .clang_arg(format!("-I{}", "./cpp/toy/include/",))
         .clang_arg(format!("-I{}", llvm_config("--includedir").unwrap()))
-        .allowlist_function(".*toy.*")
-        .allowlist_function(".*ShapeInference.*")
+        .allowlist_function(".*[Tt]oy.*")
         // Tell cargo to invalidate the built crate whenever any of the
         // included header files changed.
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))

@@ -19,6 +19,6 @@
 MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(Toy, toy,
                                       mlir::toy::ToyDialect)
 
-MlirPass mlirCreateShapeInference() {
+MlirPass mlirToyCreateShapeInference() {
   return wrap(mlir::toy::createShapeInferencePass().release());
 }

@@ -9,7 +9,7 @@ use mlir_sys::{
 
 use crate::context::Context;
 use crate::toy;
-use crate::toy::ffi::mlirCreateShapeInference;
+use crate::toy::ffi::mlirToyCreateShapeInference;
 
 impl From<toy::ffi::MlirPass> for mlir_sys::MlirPass {
     fn from(dialect: toy::ffi::MlirPass) -> Self {
@@ -51,7 +51,7 @@ impl PassManager {
 
     // TODO: this is pass created by Toy dialect and need to be extracted from common passes
     pub fn create_shape_inference_pass() -> Pass {
-        let mlir_pass = unsafe { mlirCreateShapeInference() };
+        let mlir_pass = unsafe { mlirToyCreateShapeInference() };
         Pass {
             instance: mlir_sys::MlirPass::from(mlir_pass),
         }
