@@ -70,7 +70,7 @@ impl<'ctx> MLIRGen {
         if function_ast.prototype.name != String::from("main") {
             function.set_private();
         }
-
+        // TODO: function type should be calculated based on the return value
         function
     }
 

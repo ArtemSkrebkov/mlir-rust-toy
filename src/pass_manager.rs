@@ -1,9 +1,10 @@
 use std::{ffi::CString, rc::Rc};
 
 use mlir_sys::{
-    mlirCreateTransformsCanonicalizer, mlirCreateTransformsInliner, mlirOpPassManagerAddOwnedPass,
-    mlirPassManagerAddOwnedPass, mlirPassManagerCreate, mlirPassManagerGetNestedUnder,
-    mlirPassManagerRun, mlirStringRefCreateFromCString, MlirPass, MlirPassManager,
+    mlirCreateTransformsCSE, mlirCreateTransformsCanonicalizer, mlirCreateTransformsInliner,
+    mlirOpPassManagerAddOwnedPass, mlirPassManagerAddOwnedPass, mlirPassManagerCreate,
+    mlirPassManagerGetNestedUnder, mlirPassManagerRun, mlirStringRefCreateFromCString, MlirPass,
+    MlirPassManager,
 };
 
 use crate::context::Context;
@@ -41,6 +42,14 @@ impl PassManager {
         }
     }
 
+    pub fn create_cse_pass() -> Pass {
+        let mlir_pass = unsafe { mlirCreateTransformsCSE() };
+        Pass {
+            instance: mlir_pass,
+        }
+    }
+
+    // TODO: this is pass created by Toy dialect and need to be extracted from common passes
     pub fn create_shape_inference_pass() -> Pass {
         let mlir_pass = unsafe { mlirCreateShapeInference() };
         Pass {

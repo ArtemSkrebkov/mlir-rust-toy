@@ -124,6 +124,9 @@ mod tests {
         let pass = PassManager::create_canonicalizer_pass();
         pass_manager.add_nested_pass(pass, "builtin.func");
 
+        let pass = PassManager::create_cse_pass();
+        pass_manager.add_nested_pass(pass, "builtin.func");
+
         let pass = PassManager::create_shape_inference_pass();
         pass_manager.add_nested_pass(pass, "builtin.func");
 
