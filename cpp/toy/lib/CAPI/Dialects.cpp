@@ -11,5 +11,14 @@
 #include "Toy/Dialect.h"
 #include "mlir/CAPI/Registration.h"
 
+#include "mlir/CAPI/Wrap.h"
+#include "Toy/Passes.h"
+#include "mlir/Pass/Pass.h"
+#include "mlir/CAPI/Pass.h"
+
 MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(Toy, toy,
                                       mlir::toy::ToyDialect)
+
+MlirPass mlirToyCreateShapeInference() {
+  return wrap(mlir::toy::createShapeInferencePass().release());
+}

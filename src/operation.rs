@@ -1,4 +1,5 @@
 use crate::block::Block;
+use crate::context::Context;
 use crate::location::Location;
 use crate::misc::{NamedAttribute, Type, Value};
 
@@ -6,14 +7,16 @@ use mlir_sys::{
     mlirAttributeParseGet, mlirBlockCreate, mlirBlockInsertOwnedOperation,
     mlirFunctionTypeGetInput, mlirFunctionTypeGetNumInputs, mlirFunctionTypeGetNumResults,
     mlirFunctionTypeGetResult, mlirIdentifierGet, mlirLocationGetContext, mlirModuleCreateEmpty,
-    mlirModuleGetBody, mlirModuleGetOperation, mlirNamedAttributeGet, mlirOperationCreate,
-    mlirOperationDump, mlirOperationGetResult, mlirOperationStateAddAttributes,
-    mlirOperationStateAddOperands, mlirOperationStateAddOwnedRegions, mlirOperationStateAddResults,
-    mlirOperationStateGet, mlirRegionAppendOwnedBlock, mlirRegionCreate, mlirShapedTypeGetDimSize,
-    mlirShapedTypeGetRank, mlirStringRefCreateFromCString, mlirTypeIsAFunction,
-    mlirTypeIsARankedTensor, mlirTypeIsATensor, mlirTypeIsAUnrankedTensor, mlirTypeParseGet,
-    MlirModule, MlirNamedAttribute, MlirOperation, MlirOperationState, MlirRegion, MlirType,
-    MlirValue,
+    mlirModuleCreateParse, mlirModuleGetBody, mlirModuleGetOperation, mlirNamedAttributeGet,
+    mlirOperationCreate, mlirOperationDump, mlirOperationGetAttributeByName,
+    mlirOperationGetContext, mlirOperationGetResult, mlirOperationSetAttributeByName,
+    mlirOperationStateAddAttributes, mlirOperationStateAddOperands,
+    mlirOperationStateAddOwnedRegions, mlirOperationStateAddResults, mlirOperationStateGet,
+    mlirRegionAppendOwnedBlock, mlirRegionCreate, mlirShapedTypeGetDimSize, mlirShapedTypeGetRank,
+    mlirStringAttrGet, mlirStringRefCreateFromCString, mlirSymbolTableCreate,
+    mlirSymbolTableGetVisibilityAttributeName, mlirTypeIsAFunction, mlirTypeIsARankedTensor,
+    mlirTypeIsATensor, mlirTypeIsAUnrankedTensor, mlirTypeParseGet, MlirModule, MlirNamedAttribute,
+    MlirOperation, MlirOperationState, MlirRegion, MlirType, MlirValue,
 };
 use std::ffi::CString;
 use std::rc::Rc;
@@ -57,7 +60,7 @@ impl OperationState {
         let p_state: *mut MlirOperationState = &mut self.instance;
         let p_operands: *const MlirValue = operands.as_ptr();
         unsafe {
-            mlirOperationStateAddOperands(p_state, 1, p_operands);
+            mlirOperationStateAddOperands(p_state, operands.len() as isize, p_operands);
         }
     }
 }
@@ -105,9 +108,6 @@ pub struct ModuleOp {
 impl ModuleOp {
     pub fn new(location: Location) -> Self {
         unsafe {
-            // let mut state = OperationState::new("builtin.module", location);
-            // let p_state: *mut MlirOperationState = &mut state.instance;
-            // let instance = mlirOperationCreate(p_state);
             let instance = mlirModuleCreateEmpty(location.instance);
             let mlir_block = mlirModuleGetBody(instance);
 
@@ -125,6 +125,26 @@ impl ModuleOp {
             let mlir_operation = mlirModuleGetOperation(self.instance);
             mlirOperationDump(mlir_operation);
         };
+    }
+
+    pub fn new_parsed(context: &Context, content: &str) -> Self {
+        unsafe {
+            let content = CString::new(content).unwrap();
+            let instance = mlirModuleCreateParse(
+                context.instance,
+                mlirStringRefCreateFromCString(content.as_ptr()),
+            );
+            let mlir_block = mlirModuleGetBody(instance);
+
+            // FIXME: creates a memory leak, since it is not removed
+            let _mlir_symbol_table = mlirSymbolTableCreate(mlirModuleGetOperation(instance));
+
+            Self {
+                instance,
+                block: Block::new(mlir_block),
+                pos: 0,
+            }
+        }
     }
 }
 
@@ -309,6 +329,19 @@ impl FuncOp {
             }
 
             Ok(result)
+        }
+    }
+
+    // FIXME: should be handled by symbol table once introduced
+    pub fn set_private(&self) {
+        unsafe {
+            let mlir_attr_name = mlirSymbolTableGetVisibilityAttributeName();
+            let mlir_cur_vis_attr = mlirOperationGetAttributeByName(self.instance, mlir_attr_name);
+            let str = CString::new("private").unwrap();
+            let mlir_context = mlirOperationGetContext(self.instance);
+            let mlir_new_vis_attr =
+                mlirStringAttrGet(mlir_context, mlirStringRefCreateFromCString(str.as_ptr()));
+            mlirOperationSetAttributeByName(self.instance, mlir_attr_name, mlir_new_vis_attr);
         }
     }
 }
