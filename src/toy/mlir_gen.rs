@@ -67,7 +67,9 @@ impl<'ctx> MLIRGen {
 
         let _ = self.mlir_gen_expression(function_ast.body.unwrap());
 
-        println!("block size {}", entry_block.operations.len());
+        if function_ast.prototype.name != String::from("main") {
+            function.set_private();
+        }
 
         function
     }

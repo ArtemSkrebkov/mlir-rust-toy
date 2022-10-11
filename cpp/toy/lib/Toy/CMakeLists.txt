@@ -2,7 +2,12 @@ set(LLVM_TARGET_DEFINITIONS ToyCombine.td)
 mlir_tablegen(ToyCombine.inc -gen-rewriters)
 add_public_tablegen_target(ToyCombineIncGen)
 
+set(LLVM_LINK_COMPONENTS
+  Support
+  )
+
 add_mlir_dialect_library(MLIRToy
+        ShapeInferencePass.cpp
         Dialect.cpp
         ToyCombine.cpp
 
@@ -11,8 +16,15 @@ add_mlir_dialect_library(MLIRToy
 
         DEPENDS
             ToyOpsIncGen
+            ToyShapeInferenceInterfaceIncGen
             ToyCombineIncGen
 
 	LINK_LIBS PUBLIC
-	MLIRIR
-	)
+    MLIRAnalysis
+    MLIRCastInterfaces
+    MLIRCallInterfaces
+    MLIRIR
+    MLIRParser
+    MLIRPass
+    MLIRSideEffectInterfaces
+    MLIRTransforms)

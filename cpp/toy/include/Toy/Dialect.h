@@ -15,8 +15,11 @@
 #define MLIR_TUTORIAL_TOY_DIALECT_H_
 
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
+#include "mlir/Interfaces/CastInterfaces.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "Toy/ShapeInferenceInterface.h"
 
 /// Include the auto-generated header file containing the declaration of the toy
 /// dialect.

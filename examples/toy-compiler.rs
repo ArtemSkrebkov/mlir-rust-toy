@@ -51,6 +51,9 @@ fn main() {
             let pass_manager = PassManager::new(Rc::clone(&context));
             let pass = PassManager::create_canonicalizer_pass();
             pass_manager.add_nested_pass(pass, "builtin.func");
+
+            let pass = PassManager::create_inliner_pass();
+            pass_manager.add_nested_pass(pass, "builtin.func");
             pass_manager.run(&module);
         }
         module.dump();
