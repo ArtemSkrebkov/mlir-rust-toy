@@ -26,3 +26,7 @@ MlirPass mlirToyCreateShapeInference() {
 MlirPass mlirToyCreateLowerToAffine() {
   return wrap(mlir::toy::createLowerToAffinePass().release());
 }
+
+MlirPass mlirToyCreateLowerToLLVM() {
+  return wrap(mlir::toy::createLowerToLLVMPass().release());
+}

@@ -10,6 +10,7 @@ use mlir_sys::{
 use crate::context::Context;
 use crate::toy;
 use crate::toy::ffi::mlirToyCreateLowerToAffine;
+use crate::toy::ffi::mlirToyCreateLowerToLLVM;
 use crate::toy::ffi::mlirToyCreateShapeInference;
 
 impl From<toy::ffi::MlirPass> for mlir_sys::MlirPass {
@@ -50,13 +51,6 @@ impl PassManager {
         }
     }
 
-    pub fn create_loop_fusion_pass() -> Pass {
-        let mlir_pass = unsafe { mlirCreateTransformsInliner() };
-        Pass {
-            instance: mlir_pass,
-        }
-    }
-
     // TODO: the following passes created by Toy dialect and need to be extracted from common passes
     pub fn create_shape_inference_pass() -> Pass {
         let mlir_pass = unsafe { mlirToyCreateShapeInference() };
@@ -67,6 +61,13 @@ impl PassManager {
 
     pub fn create_lower_to_affine_pass() -> Pass {
         let mlir_pass = unsafe { mlirToyCreateLowerToAffine() };
+        Pass {
+            instance: mlir_sys::MlirPass::from(mlir_pass),
+        }
+    }
+
+    pub fn create_lower_to_llvm_pass() -> Pass {
+        let mlir_pass = unsafe { mlirToyCreateLowerToLLVM() };
         Pass {
             instance: mlir_sys::MlirPass::from(mlir_pass),
         }

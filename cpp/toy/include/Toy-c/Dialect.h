@@ -19,6 +19,8 @@
 extern "C" {
 #endif
 
+MLIR_CAPI_EXPORTED MlirPass mlirToyCreateLowerToLLVM();
+
 MLIR_CAPI_EXPORTED MlirPass mlirToyCreateLowerToAffine();
 
 MLIR_CAPI_EXPORTED MlirPass mlirToyCreateShapeInference();

@@ -183,4 +183,55 @@ mod tests {
         println!("after");
         module.dump();
     }
+
+    #[test]
+    fn lower_mlir_to_llvm() {
+        let filename = "test_lower_affine";
+        let filename = format!("testdata/{}.mlir", filename);
+        if filename.is_empty() {
+            panic!("Cannot find file to read");
+        }
+        let content = std::fs::read_to_string(filename).unwrap();
+        let mut prec = HashMap::with_capacity(6);
+
+        prec.insert('=', 2);
+        prec.insert('<', 10);
+        prec.insert('+', 20);
+        prec.insert('-', 20);
+        prec.insert('*', 40);
+        prec.insert('/', 40);
+
+        let context = Rc::new(Context::default());
+        let dialect = ToyDialect::new(&context);
+        context.load_dialect(Box::new(dialect));
+
+        let module = ModuleOp::new_parsed(&context, &content);
+        println!("before");
+        module.dump();
+        println!("");
+
+        let pass_manager = PassManager::new(Rc::clone(&context));
+        let pass = PassManager::create_inliner_pass();
+        pass_manager.add_owned_pass(pass);
+
+        let pass = PassManager::create_canonicalizer_pass();
+        pass_manager.add_nested_pass(pass, "builtin.func");
+
+        let pass = PassManager::create_cse_pass();
+        pass_manager.add_nested_pass(pass, "builtin.func");
+
+        let pass = PassManager::create_shape_inference_pass();
+        pass_manager.add_nested_pass(pass, "builtin.func");
+
+        let pass = PassManager::create_lower_to_affine_pass();
+        pass_manager.add_nested_pass(pass, "builtin.func");
+        // TODO: in original mlir tutorial, they add LoopFusion and MemRefDataFlowOpt
+        // but those are not available currently in mlir-c api
+        let pass = PassManager::create_lower_to_llvm_pass();
+        pass_manager.add_owned_pass(pass);
+
+        pass_manager.run(&module);
+        println!("after");
+        module.dump();
+    }
 }

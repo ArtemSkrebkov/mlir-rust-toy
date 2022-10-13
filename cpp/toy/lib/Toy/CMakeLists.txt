@@ -9,6 +9,7 @@ set(LLVM_LINK_COMPONENTS
 add_mlir_dialect_library(MLIRToy
         ShapeInferencePass.cpp
         LowerToAffineLoops.cpp
+        LowerToLLVM.cpp
         Dialect.cpp
         ToyCombine.cpp
 
