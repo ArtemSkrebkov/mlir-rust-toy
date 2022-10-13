@@ -1,5 +1,6 @@
 use clap::Parser;
 use rsml::context::Context;
+use rsml::operation::ModuleOp;
 use rsml::pass_manager::PassManager;
 use rsml::toy;
 use rsml::toy::mlir_gen::MLIRGen;
@@ -25,7 +26,11 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    let content = std::fs::read_to_string(args.filename).unwrap();
+    if !args.filename.contains(".toy") && !args.filename.contains(".mlir") {
+        panic!("Only .toy and .mlir supported!");
+    }
+
+    let content = std::fs::read_to_string(args.filename.clone()).unwrap();
     let mut prec = HashMap::with_capacity(6);
 
     prec.insert('=', 2);
@@ -35,27 +40,50 @@ fn main() {
     prec.insert('*', 40);
     prec.insert('/', 40);
 
-    let module = toy::parser::Parser::new(content, &mut prec)
-        .parse_module()
-        .unwrap();
+    let ast_module = if args.filename.contains(".toy") {
+        Some(
+            toy::parser::Parser::new(content.clone(), &mut prec)
+                .parse_module()
+                .unwrap(),
+        )
+    } else {
+        None
+    };
     if args.emit == String::from("ast") {
-        for fun in module.functions {
+        for fun in ast_module.unwrap().functions {
             println!("-> Function parsed: \n{:#?}\n", fun);
         }
-    } else if args.emit == String::from("mlir") {
+    } else if args.emit == String::from("mlir") || args.emit == String::from("mlir-affine") {
         let context = Rc::new(Context::default());
         let dialect = ToyDialect::new(&context);
         context.load_dialect(Box::new(dialect));
-        let module = MLIRGen::new(Rc::clone(&context)).mlir_gen(module);
+        let module = if let Some(module) = ast_module {
+            MLIRGen::new(Rc::clone(&context)).mlir_gen(module)
+        } else {
+            ModuleOp::new_parsed(&context, &content)
+        };
+        let pass_manager = PassManager::new(Rc::clone(&context));
+        let pass = PassManager::create_inliner_pass();
+        pass_manager.add_owned_pass(pass);
         if args.opt {
-            let pass_manager = PassManager::new(Rc::clone(&context));
             let pass = PassManager::create_canonicalizer_pass();
             pass_manager.add_nested_pass(pass, "builtin.func");
 
-            let pass = PassManager::create_inliner_pass();
+            let pass = PassManager::create_cse_pass();
             pass_manager.add_nested_pass(pass, "builtin.func");
-            pass_manager.run(&module);
+
+            let pass = PassManager::create_shape_inference_pass();
+            pass_manager.add_nested_pass(pass, "builtin.func");
         }
+
+        if args.emit == String::from("mlir-affine") {
+            let pass = PassManager::create_lower_to_affine_pass();
+            pass_manager.add_nested_pass(pass, "builtin.func");
+            // TODO: in original mlir tutorial, they add LoopFusion and MemRefDataFlowOpt
+            // but those are not available currently in mlir-c api
+        }
+        pass_manager.run(&module);
+
         module.dump();
     }
 }

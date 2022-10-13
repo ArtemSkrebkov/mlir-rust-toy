@@ -22,3 +22,7 @@ MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(Toy, toy,
 MlirPass mlirToyCreateShapeInference() {
   return wrap(mlir::toy::createShapeInferencePass().release());
 }
+
+MlirPass mlirToyCreateLowerToAffine() {
+  return wrap(mlir::toy::createLowerToAffinePass().release());
+}
