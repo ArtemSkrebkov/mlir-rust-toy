@@ -336,7 +336,8 @@ impl FuncOp {
     pub fn set_private(&self) {
         unsafe {
             let mlir_attr_name = mlirSymbolTableGetVisibilityAttributeName();
-            let mlir_cur_vis_attr = mlirOperationGetAttributeByName(self.instance, mlir_attr_name);
+            let _mlir_cur_vis_attr = mlirOperationGetAttributeByName(self.instance, mlir_attr_name);
+            // TODO: add a validity check for mlir_cur_vis_attr
             let str = CString::new("private").unwrap();
             let mlir_context = mlirOperationGetContext(self.instance);
             let mlir_new_vis_attr =
