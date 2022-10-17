@@ -299,7 +299,7 @@ pub enum Expr {
     },
     Return {
         location: Location,
-        expression: Box<Expr>,
+        expression: Option<Box<Expr>>,
     },
     Print {
         location: Location,
@@ -869,8 +869,8 @@ impl<'a> Parser<'a> {
 
         let expression = match self.curr() {
             // TODO: argument is optional, no need to return 0 if no argument
-            Token::Semicolon => Box::new(Expr::Number(0.0)),
-            _ => Box::new(self.parse_expr()?),
+            Token::Semicolon => None,
+            _ => Some(Box::new(self.parse_expr()?)),
         };
 
         Ok(Expr::Return {

@@ -15,8 +15,8 @@ use mlir_sys::{
     mlirRegionAppendOwnedBlock, mlirRegionCreate, mlirShapedTypeGetDimSize, mlirShapedTypeGetRank,
     mlirStringAttrGet, mlirStringRefCreateFromCString, mlirSymbolTableCreate,
     mlirSymbolTableGetVisibilityAttributeName, mlirTypeIsAFunction, mlirTypeIsARankedTensor,
-    mlirTypeIsATensor, mlirTypeIsAUnrankedTensor, mlirTypeParseGet, MlirModule, MlirNamedAttribute,
-    MlirOperation, MlirOperationState, MlirRegion, MlirType, MlirValue,
+    mlirTypeIsATensor, mlirTypeIsAUnrankedTensor, mlirTypeParseGet, mlirUnitAttrGet, MlirModule,
+    MlirNamedAttribute, MlirOperation, MlirOperationState, MlirRegion, MlirType, MlirValue,
 };
 use std::ffi::CString;
 use std::rc::Rc;
@@ -220,16 +220,23 @@ impl FuncOp {
                 mlir_context,
                 mlirStringRefCreateFromCString(string_sym_name_id.as_ptr()),
             );
-            let func_attrs: [MlirNamedAttribute; 2] = [
+
+            let string_c_emit_id = CString::new("llvm.emit_c_interface").unwrap();
+            let c_emit_id = mlirIdentifierGet(
+                mlir_context,
+                mlirStringRefCreateFromCString(string_c_emit_id.as_ptr()),
+            );
+            let func_attrs: [MlirNamedAttribute; 3] = [
                 mlirNamedAttributeGet(type_id, func_type_attr),
                 mlirNamedAttributeGet(sym_name_id, func_name_attr),
+                mlirNamedAttributeGet(c_emit_id, mlirUnitAttrGet(mlir_context)),
             ];
             let p_func_attrs = func_attrs.as_ptr();
 
             let mut state = OperationState::new("builtin.func", location);
             let p_state: *mut MlirOperationState = &mut state.instance;
 
-            mlirOperationStateAddAttributes(p_state, 2, p_func_attrs);
+            mlirOperationStateAddAttributes(p_state, 3, p_func_attrs);
             mlirOperationStateAddOwnedRegions(p_state, 1, p_mlir_region);
 
             let instance = mlirOperationCreate(p_state);
@@ -336,7 +343,8 @@ impl FuncOp {
     pub fn set_private(&self) {
         unsafe {
             let mlir_attr_name = mlirSymbolTableGetVisibilityAttributeName();
-            let mlir_cur_vis_attr = mlirOperationGetAttributeByName(self.instance, mlir_attr_name);
+            let _mlir_cur_vis_attr = mlirOperationGetAttributeByName(self.instance, mlir_attr_name);
+            // TODO: add a validity check for mlir_cur_vis_attr
             let str = CString::new("private").unwrap();
             let mlir_context = mlirOperationGetContext(self.instance);
             let mlir_new_vis_attr =
