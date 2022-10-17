@@ -8,8 +8,8 @@ Fortunately, MLIR framework provides a decent C API and the current project uses
 a Rust wrapper around it to be able to implement the Toy language in Rust.
 However, some parts still require building C++ project :)
 
-The current state of `main` branch corresponds to [chapter 5](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-5/).
-So curious user can play with building AST, MLIR IR and a few available optimizations implemented in the chaper 5.
+The current state of `main` branch corresponds to [chapter 6](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-6/).
+So curious user can play with building AST, MLIR IR as well as executing Toy language sources with and without optimizations.
 There are a few bugs and some optimizations are missed since they are not yet available in C API.
 Hopefully, they will be resolved in near future.
 

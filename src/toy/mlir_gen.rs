@@ -206,10 +206,16 @@ impl<'ctx> MLIRGen {
                 expression,
             } => {
                 let location = Location::new(Rc::clone(&self.context));
-                let value = self.mlir_gen_expression(*expression).unwrap();
-                let op = ReturnOpBuilder::new(location).input(value).build();
-                self.builder.insert(op.clone());
-                Ok(Value::from(op))
+                if let Some(expr) = expression {
+                    let value = self.mlir_gen_expression(*expr).unwrap();
+                    let op = ReturnOpBuilder::new(location).input(value).build();
+                    self.builder.insert(op.clone());
+                    return Ok(Value::from(op));
+                } else {
+                    let op = ReturnOpBuilder::new(location).build();
+                    self.builder.insert(op.clone());
+                    return Ok(Value::from(op));
+                }
             }
 
             Binary { op, left, right } => {
