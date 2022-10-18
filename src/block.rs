@@ -1,5 +1,5 @@
 use crate::operation::Operation;
-use mlir_sys::MlirBlock;
+use mlir_sys::{MlirBlock, MlirRegion};
 
 #[derive(Clone)]
 pub struct Block {
@@ -7,11 +7,24 @@ pub struct Block {
     pub(crate) instance: MlirBlock,
 }
 
-impl Block {
-    pub fn new(mlir_block: MlirBlock) -> Self {
+impl From<MlirBlock> for Block {
+    fn from(mlir_block: MlirBlock) -> Self {
         Self {
-            operations: Vec::new(),
             instance: mlir_block,
+            operations: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Region {
+    pub instance: MlirRegion,
+}
+
+impl From<MlirRegion> for Region {
+    fn from(mlir_region: MlirRegion) -> Self {
+        Self {
+            instance: mlir_region,
         }
     }
 }

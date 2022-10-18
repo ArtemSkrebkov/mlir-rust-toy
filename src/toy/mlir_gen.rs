@@ -43,7 +43,7 @@ impl<'ctx> MLIRGen {
         // TODO: implement Iterator for Module?
         for f in module_ast.functions {
             let func = self.mlir_gen_function(f);
-            self.module.push_back(Box::new(Operation::from(func)));
+            self.module.push_back(Box::new(func.operation.clone()));
         }
 
         self.module.clone()
@@ -79,8 +79,14 @@ impl<'ctx> MLIRGen {
         let location = Location::new(Rc::clone(&self.context));
         let arg_types = vec![self.get_type(Vec::new()); prototype_ast.args.len()];
         let func_type = self.builder.get_function_type(arg_types, Vec::new());
+        // NB: only main function is exported to outside
+        let exported = if prototype_ast.name == String::from("main") {
+            true
+        } else {
+            false
+        };
 
-        FuncOp::new(location, &prototype_ast.name, func_type)
+        FuncOp::new(location, &prototype_ast.name, func_type, exported)
     }
 
     fn declare(&mut self, name: String, value: Value) {
