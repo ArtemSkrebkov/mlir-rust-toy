@@ -52,6 +52,7 @@ mod tests {
     #[test_case("reshape_opt", true; "when optimizing reshape")]
     #[test_case("transpose_transpose_opt", true; "when optimizing transpose")]
     #[test_case("ast_tensor", true; "when inlining")]
+    #[test_case("print_transposed", true; "complex")]
     fn generate_mlir(filename: &str, is_opt: bool) {
         let filename = format!("testdata/{}.toy", filename);
         if filename.is_empty() {

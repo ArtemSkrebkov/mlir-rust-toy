@@ -6,19 +6,20 @@ use crate::misc::{Attribute, NamedAttribute, Type, Value};
 use mlir_sys::{
     mlirAttributeParseGet, mlirBlockCreate, mlirBlockInsertOwnedOperation,
     mlirFunctionTypeGetInput, mlirFunctionTypeGetNumInputs, mlirFunctionTypeGetNumResults,
-    mlirFunctionTypeGetResult, mlirIdentifierGet, mlirLocationGetContext, mlirModuleCreateEmpty,
-    mlirModuleCreateParse, mlirModuleGetBody, mlirModuleGetOperation, mlirNamedAttributeGet,
-    mlirOperationCreate, mlirOperationDump, mlirOperationGetAttributeByName,
-    mlirOperationGetContext, mlirOperationGetResult, mlirOperationSetAttributeByName,
-    mlirOperationStateAddAttributes, mlirOperationStateAddOperands,
-    mlirOperationStateAddOwnedRegions, mlirOperationStateAddResults, mlirOperationStateGet,
-    mlirRegionAppendOwnedBlock, mlirRegionCreate, mlirShapedTypeGetDimSize, mlirShapedTypeGetRank,
-    mlirStringAttrGet, mlirStringRefCreateFromCString, mlirSymbolTableCreate,
-    mlirSymbolTableGetVisibilityAttributeName, mlirTypeIsAFunction, mlirTypeIsARankedTensor,
-    mlirTypeIsATensor, mlirTypeIsAUnrankedTensor, mlirTypeParseGet, mlirUnitAttrGet, MlirModule,
-    MlirNamedAttribute, MlirOperation, MlirOperationState, MlirRegion, MlirType, MlirValue,
+    mlirFunctionTypeGetResult, mlirIdentifierStr, mlirLocationGetContext, mlirModuleCreateEmpty,
+    mlirModuleCreateParse, mlirModuleGetBody, mlirModuleGetOperation, mlirOperationCreate,
+    mlirOperationDump, mlirOperationGetAttributeByName, mlirOperationGetContext,
+    mlirOperationGetName, mlirOperationGetNumOperands, mlirOperationGetResult,
+    mlirOperationSetAttributeByName, mlirOperationStateAddAttributes,
+    mlirOperationStateAddOperands, mlirOperationStateAddOwnedRegions, mlirOperationStateAddResults,
+    mlirOperationStateGet, mlirRegionAppendOwnedBlock, mlirRegionCreate, mlirShapedTypeGetDimSize,
+    mlirShapedTypeGetRank, mlirStringAttrGet, mlirStringRefCreateFromCString,
+    mlirSymbolTableCreate, mlirSymbolTableGetVisibilityAttributeName, mlirTypeIsAFunction,
+    mlirTypeIsARankedTensor, mlirTypeIsATensor, mlirTypeIsAUnrankedTensor, mlirTypeParseGet,
+    MlirModule, MlirNamedAttribute, MlirOperation, MlirOperationState, MlirRegion, MlirType,
+    MlirValue,
 };
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -84,6 +85,31 @@ impl Operation {
         let p_state: *mut MlirOperationState = &mut state.instance;
         let instance = unsafe { mlirOperationCreate(p_state) };
         Self { instance }
+    }
+
+    pub fn name(&self) -> String {
+        unsafe {
+            let ident = mlirOperationGetName(self.instance);
+            let mlir_name = mlirIdentifierStr(ident);
+            let c_str: &CStr = CStr::from_ptr(mlir_name.data);
+            let str_slice: &str = c_str.to_str().unwrap();
+            let str_buf: String = str_slice.to_owned();
+            str_buf
+        }
+    }
+
+    pub(crate) fn num_operands(&self) -> usize {
+        let num = unsafe { mlirOperationGetNumOperands(self.instance) };
+
+        num as usize
+    }
+}
+
+impl From<MlirOperation> for Operation {
+    fn from(mlir_operation: MlirOperation) -> Self {
+        Operation {
+            instance: mlir_operation,
+        }
     }
 }
 
@@ -265,8 +291,8 @@ impl FuncOp {
                             result.push(',');
                         }
                     } else if mlirTypeIsAUnrankedTensor(arg) {
-                        // FIXME: parse elem type
-                        result.push_str("?xf64");
+                        // TODO: parse elem type
+                        result.push_str("*xf64");
                     }
                     result.push('>');
                 }
@@ -281,6 +307,7 @@ impl FuncOp {
             for pos in 0..num_results {
                 let arg = mlirFunctionTypeGetResult(func_type.instance, pos);
                 if mlirTypeIsATensor(arg) {
+                    result.push_str("tensor<");
                     if mlirTypeIsARankedTensor(arg) {
                         let rank = mlirShapedTypeGetRank(arg);
                         for r in 0..rank {
@@ -288,7 +315,11 @@ impl FuncOp {
                             result.push_str(&dim.to_string());
                             result.push(',');
                         }
+                    } else if mlirTypeIsAUnrankedTensor(arg) {
+                        // TODO: parse elem type
+                        result.push_str("*xf64");
                     }
+                    result.push('>');
                 }
             }
             result.push(')');
@@ -317,8 +348,8 @@ impl FuncOp {
                             arg_string.push(',');
                         }
                     } else if mlirTypeIsAUnrankedTensor(arg) {
-                        // FIXME: parse elem type
-                        arg_string.push_str("?xf64");
+                        // TODO: parse elem type
+                        arg_string.push_str("*xf64");
                     }
                     arg_string.push('>');
                 }
@@ -330,6 +361,7 @@ impl FuncOp {
     }
 
     // FIXME: should be handled by symbol table once introduced
+    // it should be mutable ref since we actually change object
     pub fn set_private(&self) {
         unsafe {
             let mlir_attr_name = mlirSymbolTableGetVisibilityAttributeName();
@@ -344,6 +376,26 @@ impl FuncOp {
                 self.operation.instance,
                 mlir_attr_name,
                 mlir_new_vis_attr,
+            );
+        }
+    }
+
+    pub fn set_type(&self, func_type: &Type) {
+        let type_attr_name = CString::new("type").unwrap();
+        let func_type_string: String = Self::serialize_func_type(&func_type).unwrap();
+        let func_type_string = CString::new(&*func_type_string).unwrap();
+
+        unsafe {
+            let mlir_context = mlirOperationGetContext(self.operation.instance);
+            let mlir_new_type_attr = mlirAttributeParseGet(
+                mlir_context,
+                mlirStringRefCreateFromCString(func_type_string.as_ptr()),
+            );
+            let mlir_attr_name = mlirStringRefCreateFromCString(type_attr_name.as_ptr());
+            mlirOperationSetAttributeByName(
+                self.operation.instance,
+                mlir_attr_name,
+                mlir_new_type_attr,
             );
         }
     }
