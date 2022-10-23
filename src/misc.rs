@@ -3,8 +3,8 @@ use std::ffi::CString;
 use crate::context::Context;
 use mlir_sys::{
     mlirAttributeGetContext, mlirAttributeParseGet, mlirFlatSymbolRefAttrGet, mlirIdentifierGet,
-    mlirNamedAttributeGet, mlirNoneTypeGet, mlirStringRefCreateFromCString, mlirUnitAttrGet,
-    MlirAttribute, MlirNamedAttribute, MlirType, MlirValue,
+    mlirNamedAttributeGet, mlirStringRefCreateFromCString, mlirUnitAttrGet, MlirAttribute,
+    MlirNamedAttribute, MlirType, MlirValue,
 };
 
 #[derive(Clone)]

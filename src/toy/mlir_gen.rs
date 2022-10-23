@@ -161,7 +161,7 @@ impl<'ctx> MLIRGen {
                 let data_ty = self.builder.get_ranked_tensor_type(dims, elem_ty);
                 let data_attr: Attribute =
                     self.builder.get_dense_elements_attr(data_ty.clone(), data);
-                let mut op = ConstantOpBuilder::new(Location::new(Rc::clone(&self.context)))
+                let op = ConstantOpBuilder::new(Location::new(Rc::clone(&self.context)))
                     .result(data_ty)
                     .attribute(data_attr)
                     .build();

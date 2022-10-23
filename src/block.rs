@@ -1,8 +1,5 @@
 use crate::operation::Operation;
-use mlir_sys::{
-    mlirBlockGetFirstOperation, mlirBlockGetTerminator, mlirOperationGetNextInBlock, MlirBlock,
-    MlirRegion,
-};
+use mlir_sys::{mlirBlockGetFirstOperation, mlirOperationGetNextInBlock, MlirBlock, MlirRegion};
 
 #[derive(Clone)]
 pub struct Block {
@@ -20,9 +17,7 @@ impl Block {
                 cur = next;
                 next = mlirOperationGetNextInBlock(next);
             }
-            if cur.ptr.is_null() {
-                println!("Broken terminator op");
-            }
+
             Operation::from(cur)
         }
     }
