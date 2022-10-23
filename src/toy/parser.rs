@@ -71,19 +71,20 @@ impl LexError {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct Location {
     filename: String,
-    row: usize,
-    col: usize,
+    // TODO: one day location will be exposed in IR
+    // row: usize,
+    // col: usize,
 }
 
 impl Location {
-    pub fn new(filename: &str, row: usize, col: usize) -> Location {
+    pub fn new(filename: &str, _row: usize, _col: usize) -> Location {
         Location {
             filename: filename.to_string(),
-            row,
-            col,
+            // row,
+            // col,
         }
     }
 }
@@ -110,8 +111,8 @@ impl<'a> Lexer<'a> {
             pos: 0,
             last_location: Location {
                 filename: "filename.toy".to_string(),
-                row: 0,
-                col: 0,
+                // row: 0,
+                // col: 0,
             },
         }
     }

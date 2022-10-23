@@ -7,7 +7,7 @@ use crate::context::Context;
 use crate::location::Location;
 use crate::misc::{Attribute, Type, Value};
 use crate::op_builder::OpBuilder;
-use crate::operation::{FuncOp, ModuleOp, OneRegion, Operation};
+use crate::operation::{FuncOp, ModuleOp, OneRegion};
 
 use crate::toy::parser::Expr::{
     Binary, Call, ExprList, Number, Print, Return, Tensor, VarDecl, Variable,
@@ -43,7 +43,7 @@ impl<'ctx> MLIRGen {
         // TODO: implement Iterator for Module?
         for f in module_ast.functions {
             let func = self.mlir_gen_function(f);
-            self.module.push_back(Box::new(Operation::from(func)));
+            self.module.push_back(Box::new(func.operation.clone()));
         }
 
         self.module.clone()
@@ -55,7 +55,8 @@ impl<'ctx> MLIRGen {
         let entry_block = function.block.clone();
         let proto_args = function_ast.prototype.args.clone();
         let mut pos = 0;
-        for arg in proto_args {
+        for arg in proto_args.clone() {
+            // TODO: unsafe code
             unsafe {
                 let mlir_arg_value = mlirBlockGetArgument(entry_block.instance, pos);
                 self.declare(arg, Value::new(mlir_arg_value));
@@ -70,7 +71,20 @@ impl<'ctx> MLIRGen {
         if function_ast.prototype.name != String::from("main") {
             function.set_private();
         }
-        // TODO: function type should be calculated based on the return value
+        let last_operation = entry_block.back();
+        if last_operation.name() != String::from("toy.return") {
+            // TODO: construct location from AST location
+            let location = Location::new(Rc::clone(&self.context));
+            let op = ReturnOpBuilder::new(location).build();
+            self.builder.insert(op.clone());
+        } else if last_operation.num_operands() != 0 {
+            let arg_types = vec![self.get_type(Vec::new()); proto_args.len()];
+            let elem_type = self.builder.get_f64_type();
+            let result_type = self.builder.get_unranked_tensor_type(elem_type);
+            let func_type = self.builder.get_function_type(arg_types, vec![result_type]);
+            function.set_type(&func_type);
+        }
+
         function
     }
 
@@ -78,9 +92,16 @@ impl<'ctx> MLIRGen {
         // TODO: construct location from AST location
         let location = Location::new(Rc::clone(&self.context));
         let arg_types = vec![self.get_type(Vec::new()); prototype_ast.args.len()];
+        // NB: by default expect that there is no return value
         let func_type = self.builder.get_function_type(arg_types, Vec::new());
+        // NB: only main function is exported to outside
+        let exported = if prototype_ast.name == String::from("main") {
+            true
+        } else {
+            false
+        };
 
-        FuncOp::new(location, &prototype_ast.name, func_type)
+        FuncOp::new(location, &prototype_ast.name, func_type, exported)
     }
 
     fn declare(&mut self, name: String, value: Value) {
@@ -140,7 +161,7 @@ impl<'ctx> MLIRGen {
                 let data_ty = self.builder.get_ranked_tensor_type(dims, elem_ty);
                 let data_attr: Attribute =
                     self.builder.get_dense_elements_attr(data_ty.clone(), data);
-                let mut op = ConstantOpBuilder::new(Location::new(Rc::clone(&self.context)))
+                let op = ConstantOpBuilder::new(Location::new(Rc::clone(&self.context)))
                     .result(data_ty)
                     .attribute(data_attr)
                     .build();

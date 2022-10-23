@@ -1,5 +1,5 @@
 use crate::operation::Operation;
-use mlir_sys::MlirBlock;
+use mlir_sys::{mlirBlockGetFirstOperation, mlirOperationGetNextInBlock, MlirBlock, MlirRegion};
 
 #[derive(Clone)]
 pub struct Block {
@@ -8,10 +8,39 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn new(mlir_block: MlirBlock) -> Self {
+    // TODO: better way is to implement iterator
+    pub fn back(&self) -> Operation {
+        unsafe {
+            let mut cur = mlirBlockGetFirstOperation(self.instance);
+            let mut next = mlirOperationGetNextInBlock(cur);
+            while !next.ptr.is_null() {
+                cur = next;
+                next = mlirOperationGetNextInBlock(next);
+            }
+
+            Operation::from(cur)
+        }
+    }
+}
+
+impl From<MlirBlock> for Block {
+    fn from(mlir_block: MlirBlock) -> Self {
         Self {
-            operations: Vec::new(),
             instance: mlir_block,
+            operations: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Region {
+    pub instance: MlirRegion,
+}
+
+impl From<MlirRegion> for Region {
+    fn from(mlir_region: MlirRegion) -> Self {
+        Self {
+            instance: mlir_region,
         }
     }
 }

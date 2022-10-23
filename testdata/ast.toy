@@ -23,4 +23,5 @@ def main() {
   # Finally, calling into `multiply_transpose` with incompatible shape will
   # trigger a shape inference error.
   var f = multiply_transpose(transpose(a), c);
+  return;
 }

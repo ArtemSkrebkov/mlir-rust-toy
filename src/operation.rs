@@ -1,24 +1,25 @@
-use crate::block::Block;
+use crate::block::{Block, Region};
 use crate::context::Context;
 use crate::location::Location;
-use crate::misc::{NamedAttribute, Type, Value};
+use crate::misc::{Attribute, NamedAttribute, Type, Value};
 
 use mlir_sys::{
     mlirAttributeParseGet, mlirBlockCreate, mlirBlockInsertOwnedOperation,
     mlirFunctionTypeGetInput, mlirFunctionTypeGetNumInputs, mlirFunctionTypeGetNumResults,
-    mlirFunctionTypeGetResult, mlirIdentifierGet, mlirLocationGetContext, mlirModuleCreateEmpty,
-    mlirModuleCreateParse, mlirModuleGetBody, mlirModuleGetOperation, mlirNamedAttributeGet,
-    mlirOperationCreate, mlirOperationDump, mlirOperationGetAttributeByName,
-    mlirOperationGetContext, mlirOperationGetResult, mlirOperationSetAttributeByName,
-    mlirOperationStateAddAttributes, mlirOperationStateAddOperands,
-    mlirOperationStateAddOwnedRegions, mlirOperationStateAddResults, mlirOperationStateGet,
-    mlirRegionAppendOwnedBlock, mlirRegionCreate, mlirShapedTypeGetDimSize, mlirShapedTypeGetRank,
-    mlirStringAttrGet, mlirStringRefCreateFromCString, mlirSymbolTableCreate,
-    mlirSymbolTableGetVisibilityAttributeName, mlirTypeIsAFunction, mlirTypeIsARankedTensor,
-    mlirTypeIsATensor, mlirTypeIsAUnrankedTensor, mlirTypeParseGet, mlirUnitAttrGet, MlirModule,
-    MlirNamedAttribute, MlirOperation, MlirOperationState, MlirRegion, MlirType, MlirValue,
+    mlirFunctionTypeGetResult, mlirIdentifierStr, mlirLocationGetContext, mlirModuleCreateEmpty,
+    mlirModuleCreateParse, mlirModuleGetBody, mlirModuleGetOperation, mlirOperationCreate,
+    mlirOperationDump, mlirOperationGetAttributeByName, mlirOperationGetContext,
+    mlirOperationGetName, mlirOperationGetNumOperands, mlirOperationGetResult,
+    mlirOperationSetAttributeByName, mlirOperationStateAddAttributes,
+    mlirOperationStateAddOperands, mlirOperationStateAddOwnedRegions, mlirOperationStateAddResults,
+    mlirOperationStateGet, mlirRegionAppendOwnedBlock, mlirRegionCreate, mlirShapedTypeGetDimSize,
+    mlirShapedTypeGetRank, mlirStringAttrGet, mlirStringRefCreateFromCString,
+    mlirSymbolTableCreate, mlirSymbolTableGetVisibilityAttributeName, mlirTypeIsAFunction,
+    mlirTypeIsARankedTensor, mlirTypeIsATensor, mlirTypeIsAUnrankedTensor, mlirTypeParseGet,
+    MlirModule, MlirNamedAttribute, MlirOperation, MlirOperationState, MlirRegion, MlirType,
+    MlirValue,
 };
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -35,17 +36,16 @@ impl OperationState {
         let instance = unsafe { mlirOperationStateGet(reference, location.instance) };
 
         Self { instance, string }
-        // Self { instance }
     }
 
-    pub(crate) fn add_results(&mut self, results: Vec<Type>) {
+    pub fn add_results(&mut self, results: Vec<Type>) {
         let results: Vec<MlirType> = results.into_iter().map(|x| x.instance).collect();
         let p_state: *mut MlirOperationState = &mut self.instance;
 
         unsafe { mlirOperationStateAddResults(p_state, results.len() as isize, results.as_ptr()) };
     }
 
-    pub(crate) fn add_attributes(&mut self, attrs: Vec<NamedAttribute>) {
+    pub fn add_attributes(&mut self, attrs: Vec<NamedAttribute>) {
         let attrs: Vec<MlirNamedAttribute> = attrs.into_iter().map(|x| x.instance).collect();
         let p_state: *mut MlirOperationState = &mut self.instance;
         let p_named_attr: *const MlirNamedAttribute = attrs.as_ptr();
@@ -54,13 +54,23 @@ impl OperationState {
         }
     }
 
-    pub(crate) fn add_operands(&mut self, operands: Vec<Value>) {
+    pub fn add_operands(&mut self, operands: Vec<Value>) {
         let operands: Vec<MlirValue> = operands.into_iter().map(|x| x.instance).collect();
 
         let p_state: *mut MlirOperationState = &mut self.instance;
         let p_operands: *const MlirValue = operands.as_ptr();
         unsafe {
             mlirOperationStateAddOperands(p_state, operands.len() as isize, p_operands);
+        }
+    }
+
+    fn add_owned_regions(&mut self, regions: Vec<Region>) {
+        let regions: Vec<MlirRegion> = regions.into_iter().map(|x| x.instance).collect();
+
+        let p_state: *mut MlirOperationState = &mut self.instance;
+        let p_regions: *const MlirRegion = regions.as_ptr();
+        unsafe {
+            mlirOperationStateAddOwnedRegions(p_state, regions.len() as isize, p_regions);
         }
     }
 }
@@ -75,6 +85,31 @@ impl Operation {
         let p_state: *mut MlirOperationState = &mut state.instance;
         let instance = unsafe { mlirOperationCreate(p_state) };
         Self { instance }
+    }
+
+    pub fn name(&self) -> String {
+        unsafe {
+            let ident = mlirOperationGetName(self.instance);
+            let mlir_name = mlirIdentifierStr(ident);
+            let c_str: &CStr = CStr::from_ptr(mlir_name.data);
+            let str_slice: &str = c_str.to_str().unwrap();
+            let str_buf: String = str_slice.to_owned();
+            str_buf
+        }
+    }
+
+    pub(crate) fn num_operands(&self) -> usize {
+        let num = unsafe { mlirOperationGetNumOperands(self.instance) };
+
+        num as usize
+    }
+}
+
+impl From<MlirOperation> for Operation {
+    fn from(mlir_operation: MlirOperation) -> Self {
+        Operation {
+            instance: mlir_operation,
+        }
     }
 }
 
@@ -113,8 +148,7 @@ impl ModuleOp {
 
             Self {
                 instance,
-                // state,
-                block: Block::new(mlir_block),
+                block: Block::from(mlir_block),
                 pos: 0,
             }
         }
@@ -141,7 +175,7 @@ impl ModuleOp {
 
             Self {
                 instance,
-                block: Block::new(mlir_block),
+                block: Block::from(mlir_block),
                 pos: 0,
             }
         }
@@ -160,18 +194,15 @@ impl OneRegion for ModuleOp {
 
 #[derive(Clone)]
 pub struct FuncOp {
-    instance: MlirOperation,
-    state: OperationState,
+    pub(crate) operation: Operation,
     pub(crate) block: Rc<Block>,
-    name: CString,
 }
 
 impl FuncOp {
-    pub fn new(mut location: Location, name: &str, func_type: Type) -> Self {
+    pub fn new(mut location: Location, name: &str, func_type: Type, exported: bool) -> Self {
         unsafe {
             let mlir_context = mlirLocationGetContext(location.instance);
             let mlir_region = mlirRegionCreate();
-            let p_mlir_region: *const MlirRegion = &mlir_region;
 
             let arg_string_types: Vec<String> = Self::extract_arg_types(&func_type).unwrap();
             let arg_cstring_types: Vec<CString> = arg_string_types
@@ -193,64 +224,49 @@ impl FuncOp {
 
             let func_type_string: String = Self::serialize_func_type(&func_type).unwrap();
 
-            let string_func_attr = CString::new(func_type_string).unwrap();
-            let func_type_attr = mlirAttributeParseGet(
-                mlir_context,
-                mlirStringRefCreateFromCString(string_func_attr.as_ptr()),
-            );
-
             let mut string = String::from("\"");
             string += name;
             string += "\"";
 
-            let string_func_name_attr = CString::new(string).unwrap();
-            let func_name_attr = mlirAttributeParseGet(
-                mlir_context,
-                mlirStringRefCreateFromCString(string_func_name_attr.as_ptr()),
+            let type_attr = NamedAttribute::new(
+                "type",
+                Attribute::new_parsed(location.context(), &func_type_string),
             );
-
-            let string_type_id = CString::new("type").unwrap();
-            let type_id = mlirIdentifierGet(
-                mlir_context,
-                mlirStringRefCreateFromCString(string_type_id.as_ptr()),
+            let func_name_attr = NamedAttribute::new(
+                "sym_name",
+                Attribute::new_parsed(location.context(), &string),
             );
-
-            let string_sym_name_id = CString::new("sym_name").unwrap();
-            let sym_name_id = mlirIdentifierGet(
-                mlir_context,
-                mlirStringRefCreateFromCString(string_sym_name_id.as_ptr()),
-            );
-
-            let string_c_emit_id = CString::new("llvm.emit_c_interface").unwrap();
-            let c_emit_id = mlirIdentifierGet(
-                mlir_context,
-                mlirStringRefCreateFromCString(string_c_emit_id.as_ptr()),
-            );
-            let func_attrs: [MlirNamedAttribute; 3] = [
-                mlirNamedAttributeGet(type_id, func_type_attr),
-                mlirNamedAttributeGet(sym_name_id, func_name_attr),
-                mlirNamedAttributeGet(c_emit_id, mlirUnitAttrGet(mlir_context)),
-            ];
-            let p_func_attrs = func_attrs.as_ptr();
-
-            let mut state = OperationState::new("builtin.func", location);
-            let p_state: *mut MlirOperationState = &mut state.instance;
-
-            mlirOperationStateAddAttributes(p_state, 3, p_func_attrs);
-            mlirOperationStateAddOwnedRegions(p_state, 1, p_mlir_region);
-
-            let instance = mlirOperationCreate(p_state);
-
-            if instance.ptr.is_null() {
-                panic!("Cannot create FuncOp");
+            let mut attributes = vec![type_attr, func_name_attr];
+            if exported {
+                let c_emit_id_attr = NamedAttribute::new(
+                    "llvm.emit_c_interface",
+                    Attribute::new_unit(location.context()),
+                );
+                attributes.push(c_emit_id_attr);
             }
 
-            Self {
-                instance,
-                state,
-                block: Rc::new(Block::new(mlir_block)),
-                name: string_func_name_attr,
-            }
+            let region = Region::from(mlir_region);
+            let block = Block::from(mlir_block);
+
+            Self::create(location, block, region, attributes)
+        }
+    }
+
+    fn create(
+        location: Location,
+        block: Block,
+        region: Region,
+        attributes: Vec<NamedAttribute>,
+    ) -> Self {
+        let mut state = OperationState::new("builtin.func", location);
+        state.add_attributes(attributes);
+        state.add_owned_regions(vec![region; 1]);
+
+        let operation = Operation::new(&mut state);
+
+        Self {
+            operation,
+            block: Rc::new(block),
         }
     }
 
@@ -275,8 +291,8 @@ impl FuncOp {
                             result.push(',');
                         }
                     } else if mlirTypeIsAUnrankedTensor(arg) {
-                        // FIXME: parse elem type
-                        result.push_str("?xf64");
+                        // TODO: parse elem type
+                        result.push_str("*xf64");
                     }
                     result.push('>');
                 }
@@ -291,6 +307,7 @@ impl FuncOp {
             for pos in 0..num_results {
                 let arg = mlirFunctionTypeGetResult(func_type.instance, pos);
                 if mlirTypeIsATensor(arg) {
+                    result.push_str("tensor<");
                     if mlirTypeIsARankedTensor(arg) {
                         let rank = mlirShapedTypeGetRank(arg);
                         for r in 0..rank {
@@ -298,7 +315,11 @@ impl FuncOp {
                             result.push_str(&dim.to_string());
                             result.push(',');
                         }
+                    } else if mlirTypeIsAUnrankedTensor(arg) {
+                        // TODO: parse elem type
+                        result.push_str("*xf64");
                     }
+                    result.push('>');
                 }
             }
             result.push(')');
@@ -327,8 +348,8 @@ impl FuncOp {
                             arg_string.push(',');
                         }
                     } else if mlirTypeIsAUnrankedTensor(arg) {
-                        // FIXME: parse elem type
-                        arg_string.push_str("?xf64");
+                        // TODO: parse elem type
+                        arg_string.push_str("*xf64");
                     }
                     arg_string.push('>');
                 }
@@ -340,32 +361,42 @@ impl FuncOp {
     }
 
     // FIXME: should be handled by symbol table once introduced
+    // it should be mutable ref since we actually change object
     pub fn set_private(&self) {
         unsafe {
             let mlir_attr_name = mlirSymbolTableGetVisibilityAttributeName();
-            let _mlir_cur_vis_attr = mlirOperationGetAttributeByName(self.instance, mlir_attr_name);
+            let _mlir_cur_vis_attr =
+                mlirOperationGetAttributeByName(self.operation.instance, mlir_attr_name);
             // TODO: add a validity check for mlir_cur_vis_attr
             let str = CString::new("private").unwrap();
-            let mlir_context = mlirOperationGetContext(self.instance);
+            let mlir_context = mlirOperationGetContext(self.operation.instance);
             let mlir_new_vis_attr =
                 mlirStringAttrGet(mlir_context, mlirStringRefCreateFromCString(str.as_ptr()));
-            mlirOperationSetAttributeByName(self.instance, mlir_attr_name, mlir_new_vis_attr);
+            mlirOperationSetAttributeByName(
+                self.operation.instance,
+                mlir_attr_name,
+                mlir_new_vis_attr,
+            );
         }
     }
-}
 
-impl From<FuncOp> for Operation {
-    fn from(op: FuncOp) -> Self {
-        Self {
-            instance: op.instance,
+    pub fn set_type(&self, func_type: &Type) {
+        let type_attr_name = CString::new("type").unwrap();
+        let func_type_string: String = Self::serialize_func_type(&func_type).unwrap();
+        let func_type_string = CString::new(&*func_type_string).unwrap();
+
+        unsafe {
+            let mlir_context = mlirOperationGetContext(self.operation.instance);
+            let mlir_new_type_attr = mlirAttributeParseGet(
+                mlir_context,
+                mlirStringRefCreateFromCString(func_type_string.as_ptr()),
+            );
+            let mlir_attr_name = mlirStringRefCreateFromCString(type_attr_name.as_ptr());
+            mlirOperationSetAttributeByName(
+                self.operation.instance,
+                mlir_attr_name,
+                mlir_new_type_attr,
+            );
         }
-    }
-}
-
-impl From<FuncOp> for Value {
-    fn from(op: FuncOp) -> Self {
-        // use op to construct Value
-        let instance = unsafe { mlirOperationGetResult(op.instance, 0) };
-        Value::new(instance)
     }
 }
